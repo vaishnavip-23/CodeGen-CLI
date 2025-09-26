@@ -70,6 +70,23 @@ def parse_tool_call(text):
         return obj
     return None
 
+def _extract_filename_like(text: str) -> str:
+    """Extracts a likely filename from free-form text.
+    Heuristics: last occurrence of something like name.ext, allowing slashes.
+    Trims trailing punctuation like ?!.,:)."""
+    if not isinstance(text, str):
+        return ""
+    # Find all tokens that look like a path/filename with an extension
+    matches = re.findall(r"[\w./-]+\.[A-Za-z0-9]+", text)
+    if not matches:
+        return ""
+    candidate = matches[-1]
+    # Strip trailing punctuation
+    candidate = candidate.rstrip("?!.,:)")
+    # Strip surrounding backticks if present
+    candidate = candidate.strip("`")
+    return candidate
+
 def _infer_tool_from_text(user_text):
     """
     Fallback: infer a tool payload directly from the raw user text when LLM doesn't specify one.
@@ -81,6 +98,37 @@ def _infer_tool_from_text(user_text):
     if not isinstance(user_text, str) or not user_text.strip():
         return None
     text = user_text.strip()
+    # If the user provided a URL, infer webfetch. If they also asked to summarize,
+    # skip local inference so the LLM can summarize per the system policy.
+    url_match = re.search(r"https?://\S+", text, flags=re.I)
+    if url_match:
+        if re.search(r"\bsummariz(e|ation|e\sit)\b", text, flags=re.I):
+            return None
+        return {"tool": "webfetch", "args": [url_match.group(0)], "kwargs": {}}
+
+    # Detect chained fetch -> summarize -> write -> read pattern
+    m_chain = re.search(
+        r"fetch\s+(https?://\S+)\s+and\s+summariz(?:e|ation)?\s+to\s+(\d+)\s+(sentences|words|bullets?)\s+(?:then\s+)?write\s+to\s+`?([^`\s]+)`?\s+(?:and\s+)?(?:show|read)\b",
+        text, flags=re.I)
+    if m_chain:
+        return {
+            "plan": "fetch_summarize_write_read",
+            "url": m_chain.group(1).strip(),
+            "length": int(m_chain.group(2)),
+            "length_type": m_chain.group(3).lower(),
+            "target_path": m_chain.group(4).strip(),
+        }
+
+    # Detect simple multi-step: list files then write hello world code to a file
+    m_list_write = re.search(r"\blist\s+(?:the\s+)?files\b.*\bthen\s+write\s+(?:a\s+)?file\s+called\s+`?([^`\s]+)`?.*hello\s+world", text, flags=re.I)
+    if m_list_write:
+        target = m_list_write.group(1).strip()
+        content = "print('hello world')\n"
+        steps = [
+            {"tool": "ls", "args": ["."], "kwargs": {"names_only": True}},
+            {"tool": "write", "args": [target, content], "kwargs": {}}
+        ]
+        return {"tool": "todowrite", "steps": steps}
 
     # Split on common conjunctions to reduce bleed across clauses
     clauses = re.split(r"\b(?:and then|and|;|\&)\b", text, flags=re.I)
@@ -117,9 +165,9 @@ def _infer_tool_from_text(user_text):
         # Case B: after verbs like read/open/show me/give me
         m_read = re.search(r"\b(read|open|show me|give me)\b", text, flags=re.I)
         if m_read:
-            m_file = re.search(r"\b(read|open|show me|give me)\b\s+`?([^`\s]+)`?", text, flags=re.I)
-            if m_file:
-                fname = m_file.group(2).strip()
+            # Prefer any filename-like token anywhere after the verb
+            fname = _extract_filename_like(text)
+            if fname:
                 read_payload = {"tool": "read", "args": [fname], "kwargs": {}}
 
     # detect find file requests → glob recursive
@@ -196,10 +244,18 @@ def _infer_tool_from_text(user_text):
     return None
 
 def pretty_print(tool_name, text):
+    # Structured, concise output similar to Claude Code
     if not tool_name or str(tool_name).lower() == "none":
         print(text + "\n"); return
+    shown = text if isinstance(text, str) else str(text)
+    max_chars = 1200
+    is_truncated = len(shown) > max_chars
+    if is_truncated:
+        shown = shown[:max_chars].rstrip() + "\n... (truncated)"
     print(f"\nAgent : using tool : {tool_name}")
-    print(f"The content in the file is:\n{text}\n")
+    print("──── Output ────")
+    print(shown)
+    print("───────────────\n")
 
 def _normalize_todo_item(item):
     """
@@ -254,9 +310,8 @@ def run_todos_flow(todos):
         # Simple natural-language -> tool inference (fallback)
         if tool_payload is None:
             if re.search(r"\b(read|open|show me|what(?:'s| is) in)\b", content, flags=re.I):
-                m = re.search(r"(?:read|open|show me|what(?:'s| is) in)\s+`?([^`\n]+)`?", content, flags=re.I)
-                if m:
-                    fname = m.group(1).strip()
+                fname = _extract_filename_like(content)
+                if fname:
                     tool_payload = {"tool":"read","args":[fname],"kwargs":{}}
             elif re.search(r"\b(list|ls|show files)\b", content, flags=re.I):
                 m = re.search(r"(?:in|under)\s+`?([^`\n]+)`?", content, flags=re.I)
@@ -308,12 +363,62 @@ def repl():
                 for step in inferred["steps"]:
                     res = dispatch_tool(step)
                     out = res.get("output","")
+                    # Add meta header for webfetch
+                    if step.get("tool") == "webfetch":
+                        meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                        title = meta.get("title")
+                        url = meta.get("url")
+                        header = ((f"Title: {title}\n" if title else "") + (f"URL: {url}\n\n" if url else ""))
+                        out = header + out
                     history.append({"role":"tool","content":f"{step.get('tool')}: {out}"})
                     pretty_print(step.get("tool"), out)
+                continue
+            # Execute special chain: fetch -> summarize -> write -> read
+            if inferred.get("plan") == "fetch_summarize_write_read":
+                # Step 1: fetch
+                fetch_res = dispatch_tool({"tool": "webfetch", "args": [inferred.get("url")], "kwargs": {}})
+                fetch_out = fetch_res.get("output", "")
+                # Meta header
+                fmeta = fetch_res.get("meta", {}) if isinstance(fetch_res, dict) else {}
+                fheader = ((f"Title: {fmeta.get('title')}\n" if fmeta.get('title') else "") + (f"URL: {fmeta.get('url')}\n\n" if fmeta.get('url') else ""))
+                fetch_display = fheader + fetch_out
+                history.append({"role":"tool","content":f"webfetch: {fetch_out[:500]}"})
+                pretty_print("webfetch", fetch_display)
+                # Step 2: summarize via LLM using system policy
+                try:
+                    length = inferred.get("length") or 3
+                    ltype = inferred.get("length_type") or "sentences"
+                    summary_prompt = (
+                        f"Summarize the following text to {length} {ltype}.\n"
+                        f"Return plain text (no HTML).\n\n" + fetch_out
+                    )
+                    resp2 = client.models.generate_content(model=MODEL, contents=summary_prompt)
+                    summary_text = extract_text(resp2)
+                except Exception as e:
+                    summary_text = f"Summarization failed: {e}"
+                history.append({"role":"assistant","content":summary_text})
+                pretty_print(None, summary_text)
+                # Step 3: write
+                target = inferred.get("target_path") or "db/summary.txt"
+                write_res = dispatch_tool({"tool": "write", "args": [target, summary_text], "kwargs": {}})
+                write_out = write_res.get("output", "")
+                history.append({"role":"tool","content":f"write: {write_out}"})
+                pretty_print("write", write_out)
+                # Step 4: read
+                read_res = dispatch_tool({"tool": "read", "args": [target], "kwargs": {}})
+                read_out = read_res.get("output", "")
+                history.append({"role":"tool","content":f"read: {read_out[:500]}"})
+                pretty_print("read", read_out)
                 continue
             # Single tool path
             res = dispatch_tool(inferred)
             out = res.get("output","")
+            if inferred.get("tool") == "webfetch":
+                meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                title = meta.get("title")
+                url = meta.get("url")
+                header = ((f"Title: {title}\n" if title else "") + (f"URL: {url}\n\n" if url else ""))
+                out = header + out
             history.append({"role":"tool","content":f"{inferred.get('tool')}: {out}"})
             pretty_print(inferred.get("tool"), out)
             continue
@@ -347,6 +452,40 @@ def repl():
                 # fall back to payload args (which may be a list or string)
                 args0 = tool_call.get("args",[None])[0]
                 todos = args0 if args0 is not None else []
+            # Special-case: detect fetch+summarize+write+read in plain-English todos and run locally
+            try:
+                texts = [t.get("content","") if isinstance(t, dict) else str(t) for t in (todos or [])]
+                joined = " \n".join(texts)
+                url_m = re.search(r"https?://\S+", joined, flags=re.I)
+                summarize_m = re.search(r"\bsummariz(e|ation)\b.+?(\d+)\s+(sentences|words|bullets?)", joined, flags=re.I)
+                write_m = re.search(r"write\s+(?:it|the\s+summary)\s+to\s+`?([^`\s]+)`?", joined, flags=re.I)
+                if url_m and summarize_m and write_m:
+                    # Step 1: fetch
+                    f_res = dispatch_tool({"tool":"webfetch","args":[url_m.group(0)],"kwargs":{}})
+                    f_out = f_res.get("output","")
+                    f_meta = f_res.get("meta",{})
+                    f_header = ((f"Title: {f_meta.get('title')}\n" if f_meta.get('title') else "") + (f"URL: {f_meta.get('url')}\n\n" if f_meta.get('url') else ""))
+                    pretty_print("webfetch", f_header + f_out)
+                    # Step 2: summarize via LLM
+                    n = int(summarize_m.group(2))
+                    unit = summarize_m.group(3).lower()
+                    prompt2 = f"Summarize the following text to {n} {unit}.\nReturn plain text (no HTML).\n\n" + f_out
+                    try:
+                        resp3 = client.models.generate_content(model=MODEL, contents=prompt2)
+                        summary = extract_text(resp3)
+                    except Exception as e:
+                        summary = f"Summarization failed: {e}"
+                    pretty_print(None, summary)
+                    # Step 3: write
+                    target = write_m.group(1)
+                    w_res = dispatch_tool({"tool":"write","args":[target, summary],"kwargs":{}})
+                    pretty_print("write", w_res.get("output",""))
+                    # Step 4: read
+                    r_res = dispatch_tool({"tool":"read","args":[target],"kwargs":{}})
+                    pretty_print("read", r_res.get("output",""))
+                    continue
+            except Exception:
+                pass
             # ensure list shape
             if not isinstance(todos, list):
                 # try fallback inference
