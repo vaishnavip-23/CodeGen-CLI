@@ -1,4 +1,4 @@
-import importlib, os
+import importlib, importlib.util, sys, os
 WORKDIR = os.getcwd()
 ALLOWED_TOOLS = {"task","read","grep","ls","glob","bash","write","edit","multiedit","websearch","webfetch","exitplanmode","todowrite"}
 
@@ -38,8 +38,23 @@ def _normalize(payload):
     return True, {"name": name, "args": args, "kwargs": kwargs}
 
 def _import_module(name):
+    # First, try standard package import (tools.<name>)
     try:
         return importlib.import_module(f"tools.{name}")
+    except Exception:
+        pass
+    # Fallback: load the module directly from the tools/<name>.py file without requiring a package
+    module_path = os.path.join(WORKDIR, "tools", f"{name}.py")
+    if not os.path.exists(module_path):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(f"tools.{name}", module_path)
+        if not spec or not spec.loader:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[f"tools.{name}"] = mod
+        spec.loader.exec_module(mod)
+        return mod
     except Exception:
         return None
 
