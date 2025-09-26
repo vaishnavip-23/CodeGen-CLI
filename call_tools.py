@@ -1,75 +1,76 @@
-import importlib, importlib.util, sys, os
-WORKDIR = os.getcwd()
-ALLOWED_TOOLS = {"task","read","grep","ls","glob","bash","write","edit","multiedit","websearch","webfetch","exitplanmode","todowrite"}
+"""
+call_tools.py
 
-def _normalize(payload):
-    if not isinstance(payload, dict):
-        return False, "payload must be an object"
-    if "tool" not in payload:
-        return False, "missing 'tool'"
-    name = payload["tool"]
-    if not isinstance(name, str):
-        return False, "tool name must be string"
-    name = name.lower()
-    if name not in ALLOWED_TOOLS:
-        return False, f"tool '{name}' not allowed"
-    args = payload.get("args", [])
-    kwargs = payload.get("kwargs") or {}
-    if isinstance(args, str):
-        args = [args]
-    if isinstance(args, dict):
-        tmp = dict(kwargs); tmp.update(args); kwargs = tmp; args = []
-    if not args and isinstance(kwargs.get("args"), dict):
-        nested = kwargs.pop("args")
-        for k,v in nested.items():
-            if k not in kwargs:
-                kwargs[k] = v
-    if not args and isinstance(kwargs, dict):
-        for k in ("file_path","file","path","fname","filename"):
-            if k in kwargs and isinstance(kwargs[k], str):
-                args = [kwargs.pop(k)]
-                break
-    if not isinstance(args, list) or not isinstance(kwargs, dict):
-        return False, "'args' must be list and 'kwargs' must be object"
-    if name == "ls":
-        for k in ("names_only","dirs_only","recursive","files_only"):
-            if k in kwargs and isinstance(kwargs[k], str):
-                kwargs[k] = kwargs[k].lower() == "true"
-    return True, {"name": name, "args": args, "kwargs": kwargs}
+Simple dispatcher for tools living in tools/<name>.py.
 
-def _import_module(name):
-    # First, try standard package import (tools.<name>)
+It accepts:
+ - plan dicts: {"steps":[...], "explain":"..."}
+ - single-step dict: {"tool":"read","args":[...],"kwargs":{...}}
+ - list of steps: [ step1, step2, ... ]
+
+Each tool must implement call(*args, **kwargs) and return a dict:
+  {"tool": "<name>", "success": True/False, "output": ...}
+"""
+
+import importlib
+import traceback
+import os
+
+def _load_tool_module(name):
     try:
-        return importlib.import_module(f"tools.{name}")
-    except Exception:
-        pass
-    # Fallback: load the module directly from the tools/<name>.py file without requiring a package
-    module_path = os.path.join(WORKDIR, "tools", f"{name}.py")
-    if not os.path.exists(module_path):
-        return None
+        module = importlib.import_module(f"tools.{name}")
+        return module
+    except ModuleNotFoundError:
+        raise RuntimeError(f"Tool '{name}' not found. Expected tools/{name}.py")
+
+def _exec_step(step):
+    # Determine tool name, args, kwargs
+    if isinstance(step, dict) and "tool" in step:
+        tool = step["tool"]
+        args = step.get("args", []) or []
+        kwargs = step.get("kwargs", {}) or {}
+    elif isinstance(step, (list, tuple)):
+        tool = step[0]
+        args = list(step[1:])
+        kwargs = {}
+    elif isinstance(step, str):
+        parts = step.split()
+        tool = parts[0]
+        args = parts[1:]
+        kwargs = {}
+    else:
+        return {"tool": "<unknown>", "success": False, "output": f"Unsupported step format: {type(step)}"}
+
     try:
-        spec = importlib.util.spec_from_file_location(f"tools.{name}", module_path)
-        if not spec or not spec.loader:
-            return None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[f"tools.{name}"] = mod
-        spec.loader.exec_module(mod)
-        return mod
+        module = _load_tool_module(tool)
+    except Exception as e:
+        return {"tool": tool, "success": False, "output": f"Tool load error: {e}"}
+
+    if not hasattr(module, "call"):
+        return {"tool": tool, "success": False, "output": f"Tool '{tool}' has no call(...) function."}
+
+    try:
+        res = module.call(*args, **kwargs)
+        if isinstance(res, dict):
+            res.setdefault("tool", tool)
+        return res
     except Exception:
-        return None
+        return {"tool": tool, "success": False, "output": f"Exception while running tool '{tool}': {traceback.format_exc()}"}
 
 def dispatch_tool(payload):
-    ok, parsed = _normalize(payload)
-    if not ok:
-        return {"success": False, "output": parsed, "meta": {}}
-    name = parsed["name"]; args = parsed["args"]; kwargs = parsed["kwargs"]
-    mod = _import_module(name)
-    if not mod or not hasattr(mod, "call"):
-        return {"success": False, "output": f"Tool not found: {name}", "meta": {}}
-    try:
-        res = mod.call(*args, **kwargs)
-    except Exception as e:
-        return {"success": False, "output": f"Tool runtime error: {e}", "meta": {}}
-    if not isinstance(res, dict) or "success" not in res or "output" not in res:
-        return {"success": False, "output": "Invalid tool response shape", "meta": {"raw": res}}
-    return res
+    """
+    Dispatch plan or steps. Return a single result dict or a list of result dicts.
+    """
+    if isinstance(payload, list):
+        results = []
+        for s in payload:
+            results.append(_exec_step(s))
+        return results
+    if isinstance(payload, dict) and "steps" in payload and isinstance(payload["steps"], list):
+        results = []
+        for s in payload["steps"]:
+            results.append(_exec_step(s))
+        return results
+    if isinstance(payload, dict) and "tool" in payload:
+        return _exec_step(payload)
+    return _exec_step(payload)
