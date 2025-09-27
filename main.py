@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """
-main.py - CLI coding agent (updated)
+CodeGen2 - CLI Coding Agent
 
-This file implements:
-- REPL for natural language and direct tool invocations
-- Plan generation via Gemini (google.genai) client
-- Plan validation, confirmation for destructive steps
-- Conservative Write->Edit conversion when user intent suggests "change"
-- History persistence in history.json
-
-Note: This version uses output.print_user_box(...) (backwards-compatible name).
+A command-line assistant that understands natural language and can interact with your codebase.
+Uses Google Gemini API for plan generation and executes actions through modular tools.
 """
 
 import os
@@ -18,44 +12,45 @@ import traceback
 from datetime import datetime
 from typing import Tuple, Any, Dict, List
 
-# optional: load .env
+# Load environment variables
 try:
-    from dotenv import load_dotenv  # type: ignore
+    from dotenv import load_dotenv
     load_dotenv()
-except Exception:
+except ImportError:
     pass
 
-# try import google genai
+# Initialize Gemini API client
 try:
-    from google import genai  # type: ignore
-except Exception:
+    from google import genai
+except ImportError:
     genai = None
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
 CLIENT = None
-if genai is not None and API_KEY:
+if genai and API_KEY:
     try:
         CLIENT = genai.Client(api_key=API_KEY)
     except Exception:
         CLIENT = None
 
-# repo paths
+# File paths
 WORKSPACE_ROOT = os.getcwd()
 SYSTEM_PROMPT_PATH = os.path.join(WORKSPACE_ROOT, "system_prompt.txt")
 BEHAVIOR_PATH = os.path.join(WORKSPACE_ROOT, "behavior.md")
 HISTORY_PATH = os.path.join(WORKSPACE_ROOT, "history.json")
 
-# internal modules (must exist)
+# Import local modules
 from call_tools import dispatch_tool
-import output  # assumed present in repo for pretty printing
+import output
 
-# destructive tool names
-DESTRUCTIVE_TOOLS = {"write", "edit", "multiedit", "bash", "Write", "Edit", "MultiEdit", "Bash"}
+# Tools that can modify files
+DESTRUCTIVE_TOOLS = {"write", "edit", "multiedit", "bash", "delete", "Write", "Edit", "MultiEdit", "Bash", "Delete"}
 
-# -------------------------
-# History helpers
-# -------------------------
+# ---------------------------
+# History Management
+# ---------------------------
 def load_history(limit: int = 20) -> List[Dict[str, Any]]:
+    """Load recent history from JSON file."""
     try:
         with open(HISTORY_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -68,6 +63,7 @@ def load_history(limit: int = 20) -> List[Dict[str, Any]]:
         return []
 
 def append_history(user_text: str, agent_plan: Any, results: Any):
+    """Save interaction to history file."""
     entry = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "user": user_text,
@@ -82,10 +78,11 @@ def append_history(user_text: str, agent_plan: Any, results: Any):
     except Exception:
         pass
 
-# -------------------------
-# Prompt building
-# -------------------------
+# ---------------------------
+# LLM Integration
+# ---------------------------
 def _load_system_behavior_and_history(history_limit: int = 8):
+    """Load system prompt, behavior guidelines, and recent history."""
     try:
         with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
             system_text = f.read()
@@ -115,14 +112,8 @@ def _load_system_behavior_and_history(history_limit: int = 8):
     history_block = "\n\n".join(lines) if lines else "(no recent history)"
     return system_text, behavior_text, history_block
 
-# -------------------------
-# LLM call (single-string contents)
-# -------------------------
 def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperature: float = 0.0) -> Tuple[str, str]:
-    """
-    Compose single-string prompt and call genai.Client.models.generate_content.
-    Returns ("OK", text) or ("ERROR:CODE", message).
-    """
+    """Call Gemini API to generate a structured plan."""
     if CLIENT is None:
         if genai is None:
             return ("ERROR:NO_CLIENT", "google.genai not available. Install google-genai==1.12.1.")
@@ -155,14 +146,13 @@ def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperatu
     parts.append("<USER_INSTRUCTION_START>")
     parts.append(user_text.strip())
     parts.append("<USER_INSTRUCTION_END>\n")
-
     parts.append("IMPORTANT: Return ONLY a single valid JSON object that matches the plan schema exactly.")
     prompt = "\n\n".join(parts)
 
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=prompt,  # single string for compatibility
+            contents=prompt,
             config={"temperature": float(temperature), "max_output_tokens": int(max_output_tokens)}
         )
     except Exception as e:
@@ -196,10 +186,11 @@ def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperatu
     except Exception as e:
         return ("ERROR:EXTRACTION", f"Failed to extract text: {e}\n{traceback.format_exc()}")
 
-# -------------------------
-# Plan validation & parsing
-# -------------------------
+# ---------------------------
+# Plan Validation
+# ---------------------------
 def validate_plan(plan: Any):
+    """Validate that plan has correct structure."""
     if not isinstance(plan, dict):
         return False, ["Plan must be a JSON object."]
     if "steps" not in plan or not isinstance(plan["steps"], list):
@@ -221,6 +212,7 @@ def validate_plan(plan: Any):
     return (len(msgs) == 0), msgs
 
 def generate_plan(user_text: str, retries: int = 1):
+    """Generate and validate a plan from user input."""
     status, reply = call_llm_structured(user_text, max_output_tokens=1024, temperature=0.0)
     if not status.startswith("OK"):
         return False, reply
@@ -256,7 +248,7 @@ def generate_plan(user_text: str, retries: int = 1):
         return False, {"validation_errors": msgs}
 
     if isinstance(plan, dict) and isinstance(plan.get("steps"), list) and len(plan.get("steps")) == 0:
-        reprompt = ("You returned an empty plan. If the user's instruction was actionable, produce a JSON plan with steps. Otherwise return {\"steps\": [], \"explain\": \"No specific action requested.\"}. Return ONLY JSON.")
+        reprompt = ('You returned an empty plan. If the user\'s instruction was actionable, produce a JSON plan with steps. Otherwise return {"steps": [], "explain": "No specific action requested."}. Return ONLY JSON.')
         s2, r2 = call_llm_structured(reprompt, max_output_tokens=256)
         if s2.startswith("OK"):
             try:
@@ -269,28 +261,11 @@ def generate_plan(user_text: str, retries: int = 1):
 
     return True, plan
 
-# -------------------------
-# Small-talk handlers
-# -------------------------
-def read_behavior_snippet(max_chars: int = 1200) -> str:
-    try:
-        with open(BEHAVIOR_PATH, "r", encoding="utf-8") as f:
-            t = f.read()
-            return (t[:max_chars] + "...") if len(t) > max_chars else t
-    except Exception:
-        return ""
-
-def last_agent_explain() -> str:
-    hist = load_history(limit=20)
-    for e in reversed(hist):
-        plan = e.get("agent_plan", {})
-        if isinstance(plan, dict):
-            explain = plan.get("explain")
-            if explain:
-                return explain
-    return ""
-
+# ---------------------------
+# Small Talk Handlers
+# ---------------------------
 def handle_small_talk(user_text: str) -> bool:
+    """Handle common greetings and questions without using tools."""
     s = user_text.strip().lower()
     greetings = {"hi", "hii", "hello", "hey", "heyy", "hiya", "yo"}
     if s in greetings:
@@ -348,38 +323,25 @@ I can help you with code analysis, file management, project organization, and mu
 
     return False
 
-# -------------------------
-# Simple tokenization & parsing (avoid shlex on freeform text)
-# -------------------------
+# ---------------------------
+# Tool Invocation Parser
+# ---------------------------
 def _simple_split_first_word(line: str) -> str:
-    """
-    Return the first whitespace-separated token (lowercased).
-    This avoids shlex parsing errors on natural language.
-    """
+    """Get first word from line (for tool detection)."""
     if not line:
         return ""
     return line.strip().split()[0].lower()
 
 def is_likely_natural_language(line: str) -> bool:
-    """
-    Heuristic: if first token matches a known tool name, treat as tool invocation.
-    Otherwise treat as natural language instruction.
-    """
+    """Check if input looks like natural language vs tool command."""
     first = _simple_split_first_word(line)
-    known_tools = {"read", "ls", "glob", "grep", "write", "edit", "multiedit", "todowrite", "webfetch", "websearch", "bash", "task", "exitplanmode", "todo"}
+    known_tools = {"read", "ls", "glob", "grep", "write", "edit", "multiedit", "todowrite", "webfetch", "websearch", "bash", "task", "delete", "todo"}
     if first in ("help", "exit", "quit"):
         return False
     return first not in known_tools
 
 def parse_as_tool_invocation(line: str):
-    """
-    Very simple parser for tool invocations:
-      read path
-      ls /abs/path
-      write file.txt "some content"
-    We use basic whitespace splitting to avoid shlex-related errors.
-    If the user provides JSON (starts with { or [), parse with json.loads.
-    """
+    """Parse tool command into structured format."""
     s = line.strip()
     if not s:
         return None
@@ -392,21 +354,18 @@ def parse_as_tool_invocation(line: str):
     tool = parts[0]
     args = parts[1:]
     kwargs = {}
-    # Special-case: if user typed "list files" or "list all files", handle separately
+    # Special case: "list files" -> ls command
     if tool.lower() in ("list",) and len(args) >= 1 and args[0].lower().startswith("file"):
         return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
     if tool.lower() == "ls" and not args:
         return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
     return {"tool": tool, "args": args, "kwargs": kwargs}
 
-# -------------------------
-# Helper: recursive repo listing (ignores noisy dirs)
-# -------------------------
+# ---------------------------
+# File Listing
+# ---------------------------
 def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) -> List[str]:
-    """
-    Walk the workspace root and return a sorted list of repo-relative file paths.
-    Ignores typical noisy directories.
-    """
+    """Get all files in repository, ignoring common build/cache directories."""
     if ignore_dirs is None:
         ignore_dirs = {".git", "node_modules", "__pycache__", ".venv", ".env", ".cache", ".pytest_cache"}
     else:
@@ -414,14 +373,13 @@ def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) ->
     root_path = os.path.abspath(root)
     files_out = []
     for dirpath, dirnames, filenames in os.walk(root_path):
-        # compute relative path parts
-        # remove ignored directories from traversal in-place
+        # Remove ignored directories from traversal
         dirnames[:] = [d for d in dirnames if d not in ignore_dirs and not d.startswith(".") or d in (".",)]
-        # also skip if path contains ignored components
+        # Skip if path contains ignored components
         rel_dir = os.path.relpath(dirpath, root_path)
         if rel_dir == ".":
             rel_dir = ""
-        # add files
+        # Add files
         for fn in filenames:
             if fn in (".env",):
                 continue
@@ -432,6 +390,7 @@ def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) ->
     return files_out
 
 def print_recursive_listing():
+    """Print all repository files."""
     files = list_repo_files_recursive(".")
     try:
         output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
@@ -440,10 +399,11 @@ def print_recursive_listing():
         for p in files:
             print(p)
 
-# -------------------------
-# Convert Write->Edit when user intent is "change"
-# -------------------------
+# ---------------------------
+# Write to Edit Conversion
+# ---------------------------
 def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[str, Any]:
+    """Convert Write commands to Edit when user wants to change existing files."""
     if not isinstance(plan, dict):
         return plan
     steps = plan.get("steps", [])
@@ -497,14 +457,16 @@ def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[st
     plan["steps"] = new_steps
     return plan
 
-# -------------------------
-# REPL
-# -------------------------
+# ---------------------------
+# Main REPL
+# ---------------------------
 def print_intro():
+    """Print welcome message."""
     print("CLI Coding Agent — workspace:", WORKSPACE_ROOT)
     print("Type 'help' for help. Non-destructive steps run immediately. Destructive steps require confirmation.")
 
 def repl():
+    """Main read-eval-print loop."""
     print_intro()
     while True:
         try:
@@ -518,11 +480,11 @@ def repl():
         if not line.strip():
             continue
 
-        # Handle special-case commands (exact)
+        # Handle special commands
         low = line.strip().lower()
         if low in ("help", "--help", "-h"):
             try:
-                output.print_help_box()
+                output.print_help()
             except Exception:
                 print("Help: try natural language or tool invocations like 'read README.md' or 'list files'.")
             continue
@@ -530,48 +492,47 @@ def repl():
             print("Bye.")
             break
 
-        # Special-case list files phrases and handle locally with recursive listing
+        # Handle "list files" command
         if low in ("list files", "list all files", "ls -r", "ls -R"):
             print_recursive_listing()
             append_history(line, {"steps": [], "explain": "list_files_recursive"}, [])
             continue
 
-        # shortcut: todo
+        # Handle "todo" shortcut
         if low.startswith("todo "):
             parsed = parse_as_tool_invocation("todowrite " + line[len("todo "):])
             res = dispatch_tool(parsed)
-            output.print_result(parsed.get("tool"), res)
+            output.print_tool_result(parsed.get("tool"), res)
             append_history(line, parsed, [res])
             continue
 
-        # If looks like direct tool invocation, parse & dispatch
+        # Handle direct tool invocations
         if not is_likely_natural_language(line):
             parsed = parse_as_tool_invocation(line)
             if parsed is None:
                 output.print_error("Could not parse tool invocation.")
                 continue
 
-            # if ls with args empty default to recursive listing
+            # Handle ls command
             if parsed.get("tool", "").lower() == "ls":
                 try:
                     res = dispatch_tool(parsed)
-                    output.print_result(parsed.get("tool"), res)
+                    output.print_tool_result(parsed.get("tool"), res)
                     append_history(line, parsed, [res])
                 except Exception as e:
                     output.print_error(f"LS tool failed: {e}")
                 continue
 
             results = dispatch_tool(parsed)
-            output.print_result(parsed.get("tool"), results)
+            output.print_tool_result(parsed.get("tool"), results)
             append_history(line, parsed, [results])
             continue
 
-        # Natural language path
+        # Handle natural language
         user_text = line
-        # <-- changed here: use print_user_box (Option A)
-        output.print_user_box(user_text)
+        output.print_user_input(user_text)
 
-        # Small talk handled locally
+        # Handle small talk
         if handle_small_talk(user_text):
             continue
 
@@ -583,7 +544,7 @@ def repl():
             continue
         plan = plan_or_err
 
-        # If plan empty and explain present, show explain
+        # Handle empty plans
         if isinstance(plan, dict) and isinstance(plan.get("steps"), list) and len(plan.get("steps")) == 0:
             explain = plan.get("explain", "").strip()
             if explain:
@@ -591,7 +552,7 @@ def repl():
                 append_history(user_text, plan, [])
                 continue
 
-        # detect destructive steps
+        # Check for destructive steps
         destructive = []
         for i, s in enumerate(plan.get("steps", []), start=1):
             tool_name = s.get("tool", "").lower() if isinstance(s, dict) else ""
@@ -617,11 +578,11 @@ def repl():
                 continue
             print("Running non-destructive steps only (destructive skipped).")
 
-        # Convert Write -> Edit conservatively for "change"-like user intents
+        # Convert Write to Edit if needed
         plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
         plan_for_dispatch = maybe_convert_write_to_edit(plan_for_dispatch, user_text)
 
-        # Dispatch steps
+        # Execute plan
         to_dispatch = {"steps": plan_for_dispatch.get("steps", [])}
         results = dispatch_tool(to_dispatch)
 
@@ -629,12 +590,12 @@ def repl():
         if isinstance(results, list):
             for r in results:
                 tool_name = r.get("tool", "<unknown>")
-                output.print_agent_tool_use(tool_name)
-                output.print_result(tool_name, r)
+                output.print_agent_action(tool_name)
+                output.print_tool_result(tool_name, r)
         else:
             tool_name = results.get("tool", "<unknown>")
-            output.print_agent_tool_use(tool_name)
-            output.print_result(tool_name, results)
+            output.print_agent_action(tool_name)
+            output.print_tool_result(tool_name, results)
 
         append_history(user_text, plan, results if isinstance(results, list) else [results])
 
