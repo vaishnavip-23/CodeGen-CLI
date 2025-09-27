@@ -299,7 +299,37 @@ def handle_small_talk(user_text: str) -> bool:
         return True
 
     if "what can you do" in s or "what do you do" in s or "capabilities" in s:
-        reply = "I can inspect, search, modify, and manage files in this repository (read, ls, glob, grep, write, edit, multiedit, todowrite, webfetch, websearch, bash)."
+        reply = """# CodeGen2 - CLI Coding Agent Capabilities
+
+## Core Functionality
+I am a repository-aware CLI coding assistant that can interact with your codebase through natural language commands.
+
+## File Operations
+- **Read**: Examine file contents with optional line limits
+- **Write**: Create new files or overwrite existing ones (with confirmation)
+- **Edit**: Modify existing files by replacing text
+- **MultiEdit**: Perform multiple file edits in sequence
+
+## Search & Discovery
+- **List Files**: Browse directories with filtering options
+- **Search Text**: Find patterns across files using grep
+- **Pattern Matching**: Locate files using glob patterns
+
+## Web Integration
+- **Web Search**: Search the internet using DuckDuckGo
+- **Web Fetch**: Download and extract content from URLs
+
+## System Operations
+- **Bash Commands**: Execute shell commands safely (with restrictions)
+- **Task Management**: Create and manage todo lists
+- **Codebase Analysis**: Generate comprehensive project summaries
+
+## Safety Features
+- **Path Protection**: Prevents access outside workspace
+- **Confirmation Required**: Asks permission for destructive changes
+- **Command Security**: Blocks dangerous shell commands
+
+I can help you with code analysis, file management, project organization, and much more!"""
         print("Assistant:", reply)
         append_history(user_text, {"steps": [], "explain": "capabilities_reply"}, [])
         return True
