@@ -1,74 +1,125 @@
-import requests, html, re
+"""
+Web Fetch Tool for CodeGen2
 
-def _strip_html(doc: str) -> str:
-    doc = re.sub(r"<script[\s\S]*?</script>", " ", doc, flags=re.I|re.S)
-    doc = re.sub(r"<style[\s\S]*?</style>", " ", doc, flags=re.I|re.S)
-    doc = re.sub(r"<[^>]+>", " ", doc)
-    doc = html.unescape(doc)
-    doc = re.sub(r"\s+", " ", doc).strip()
-    return doc
+This tool fetches content from web URLs and extracts text.
+It includes content length limits and error handling.
+"""
 
-def _extract_between(raw: str, start_tag_regex: str, end_tag: str) -> str:
-    m = re.search(start_tag_regex, raw, flags=re.I)
-    if not m:
-        return ""
-    start = m.end()
-    end = raw.find(end_tag, start)
-    if end == -1:
-        end = len(raw)
-    return raw[start:end]
+import requests
+from bs4 import BeautifulSoup
+from typing import Dict, Any, Optional
 
-def _extract_main_text(raw: str) -> tuple[str, str]:
-    # Prefer <main>, then <article>, then role="main"
-    main_html = _extract_between(raw, r"<main\b[^>]*>", "</main>")
-    if main_html:
-        return _strip_html(main_html), "main"
-    art_html = _extract_between(raw, r"<article\b[^>]*>", "</article>")
-    if art_html:
-        return _strip_html(art_html), "article"
-    role_main = _extract_between(raw, r"<div\b[^>]*role=\"main\"[^>]*>", "</div>")
-    if role_main:
-        return _strip_html(role_main), "role=main"
-    # Fallback: aggregate first N <p> tags
-    paras = re.findall(r"<p\b[^>]*>([\s\S]*?)</p>", raw, flags=re.I)
-    if paras:
-        text = _strip_html("\n".join(paras[:20]))
-        return text, "p-aggregate"
-    return "", "none"
-
-def call(url, prompt: str = ""):
+def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
+    """
+    Fetch and extract content from a web URL.
+    
+    Args:
+        url: URL to fetch content from
+        max_chars: Maximum number of characters to return
+        
+    Returns:
+        Dictionary with title, text, and url
+    """
     try:
+        # Prepare request headers
         headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; CodeGen2/1.0; +https://example.local)"
+            "User-Agent": "CodeGen2-CLI-Agent/1.0"
         }
-        r = requests.get(url, timeout=12, headers=headers, allow_redirects=True)
-        r.raise_for_status()
-        # Respect apparent encoding if server didn't set one
-        if not r.encoding and hasattr(r, "apparent_encoding") and r.apparent_encoding:
-            r.encoding = r.apparent_encoding
-        raw = r.text[:300000]
-        # Try to extract helpful metadata for JS-heavy pages
-        title_m = re.search(r"<title[^>]*>([\s\S]*?)</title>", raw, flags=re.I)
-        title = html.unescape(title_m.group(1)).strip() if title_m else ""
-        desc = ""
-        for meta_name in ("description", "og:description", "twitter:description"):
-            pattern = r'<meta[^>]+(?:name|property)="' + re.escape(meta_name) + r'"[^>]+content="([^"]+)"'
-            m = re.search(pattern, raw, flags=re.I)
-            if m:
-                desc = html.unescape(m.group(1)).strip()
-                break
-
-        main_text, source = _extract_main_text(raw)
-        if main_text:
-            return {"success": True, "output": main_text[:20000], "meta": {"url": url, "source": source, "title": title}}
-
-        plain = _strip_html(raw)
-        # If body text is too short (likely JS-rendered), fall back to title + description
-        if len(plain) < 500 and (title or desc):
-            combined = (title + ": " + desc).strip(": ")
-            return {"success": True, "output": combined[:2000], "meta": {"url": url, "source": "meta", "title": title}}
-
-        snippet = plain[:20000]
-        return {"success": True, "output": snippet, "meta": {"url": url, "source": "plain", "title": title}}
+        
+        # Make request
+        response = requests.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+        
+        # Parse HTML content
+        soup = BeautifulSoup(response.text, "html.parser")
+        
+        # Extract title
+        title = ""
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+        
+        # Extract text content from paragraphs
+        paragraphs = []
+        for p in soup.find_all("p"):
+            text = p.get_text(separator=" ", strip=True)
+            if text:  # Only add non-empty paragraphs
+                paragraphs.append(text)
+        
+        # Join paragraphs or fall back to all text
+        if paragraphs:
+            text = "\n\n".join(paragraphs)
+        else:
+            text = soup.get_text(separator=" ", strip=True)
+        
+        # Truncate if too long
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n[Content truncated]"
+        
+        return {
+            "title": title,
+            "text": text,
+            "url": url
+        }
+        
+    except requests.RequestException as e:
+        raise Exception(f"Network error: {e}")
     except Exception as e:
-        return {"success": False, "output": f"Fetch error: {e}", "meta": {}}
+        raise Exception(f"Content extraction error: {e}")
+
+def call(url: str, *args, **kwargs) -> Dict[str, Any]:
+    """
+    Fetch content from a web URL.
+    
+    Args:
+        url: URL to fetch content from
+        *args: Additional positional arguments (ignored)
+        **kwargs: Keyword arguments including:
+            prompt: Optional prompt (not used, kept for compatibility)
+            max_chars: Maximum number of characters to return (default: 20000)
+        
+    Returns:
+        Dictionary with success status and content
+    """
+    # Extract parameters from kwargs
+    max_chars = kwargs.get("max_chars", 20000)
+    # Validate inputs
+    if not url or not url.strip():
+        return {
+            "tool": "webfetch",
+            "success": False,
+            "output": "URL cannot be empty."
+        }
+    
+    if max_chars < 100 or max_chars > 100000:
+        return {
+            "tool": "webfetch",
+            "success": False,
+            "output": "Max characters must be between 100 and 100000."
+        }
+    
+    # Validate URL format
+    url = url.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = "https://" + url
+    
+    try:
+        # Fetch content
+        content = fetch_web_content(url, max_chars)
+        
+        return {
+            "tool": "webfetch",
+            "success": True,
+            "output": content,
+            "meta": {
+                "url": url,
+                "content_length": len(content["text"]),
+                "max_chars": max_chars
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "tool": "webfetch",
+            "success": False,
+            "output": f"Web fetch error: {e}"
+        }

@@ -1,22 +1,17 @@
-import os
-def call(file_path, edits):
-    if not isinstance(edits, list) or not edits:
-        return {"success": False, "output": "edits must be a non-empty list", "meta": {}}
-    if not os.path.exists(file_path):
-        return {"success": False, "output": "file not found", "meta": {}}
-    try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            txt = f.read()
-        for e in edits:
-            old = e["old_string"]; new = e["new_string"]; replace_all = e.get("replace_all", False)
-            if replace_all:
-                txt = txt.replace(old, new)
-            else:
-                if txt.count(old) != 1:
-                    return {"success": False, "output": "old_string not unique in sequential multiedit", "meta": {}}
-                txt = txt.replace(old, new, 1)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(txt)
-    except Exception as e:
-        return {"success": False, "output": f"MultiEdit error: {e}", "meta": {}}
-    return {"success": True, "output": f"Applied {len(edits)} edits to {file_path}", "meta": {}}
+from edit import call as edit_call
+
+def call(edits):
+    if not isinstance(edits, (list, tuple)):
+        return {"success": False, "output": "multiedit expects a list of edit dicts."}
+    summary = []
+    for i, e in enumerate(edits, start=1):
+        path = e.get("path")
+        mode = e.get("mode", "replace")
+        a = e.get("a")
+        b = e.get("b")
+        # reuse edit.call semantics
+        res = edit_call(path, a, b, e.get("replace_all", False))
+        summary.append({"step": i, "path": path, "result": res})
+        if not res.get("success"):
+            return {"success": False, "output": summary}
+    return {"success": True, "output": summary}
