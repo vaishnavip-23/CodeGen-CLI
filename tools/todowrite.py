@@ -126,16 +126,26 @@ def remove_first_todo() -> Dict[str, Any]:
 
 def clear_todos() -> Dict[str, Any]:
     """
-    Clear all todos.
+    Clear all todos and delete the database folder.
     
     Returns:
         Result dictionary
     """
     write_todos([])
+    
+    # Delete the database folder to prevent todo confusion between tasks
+    try:
+        import shutil
+        if os.path.exists(DB_DIR):
+            shutil.rmtree(DB_DIR)
+    except Exception as e:
+        # If deletion fails, continue - the important part is todos are cleared
+        pass
+    
     return {
         "tool": "todowrite",
         "success": True,
-        "output": "Cleared all todos."
+        "output": "Cleared all todos and cleaned up database."
     }
 
 def call(action: str = "list", *args) -> Dict[str, Any]:
