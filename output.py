@@ -1,171 +1,214 @@
 """
-Output formatting utilities for CodeGen2
+output.py - nicer console output helpers for CodeGen2 (updated)
 
-This module provides functions to format and display output in a user-friendly way.
-All output is formatted with boxes and clear headers for better readability.
+This file provides a consistent set of printing helpers that main.py expects.
+Key behaviors:
+- Show user input inside a boxed header (print_user_box).
+- Show generic boxed messages (print_boxed).
+- Pretty-print tool results (print_result) using code blocks with line numbers
+  when the output looks like file/code content.
+- Provide small helpers: print_agent_tool_use, print_help_box, print_error.
+- Keep functions simple and readable for beginners.
 """
 
+import os
 import textwrap
+from typing import Dict, Any, List
+from pathlib import Path
 import json
-from typing import Dict, Any
 
-# Maximum width for text boxes
 BOX_WIDTH = 78
 
-# ============================================================================
-# TEXT FORMATTING HELPERS
-# ============================================================================
 
-def wrap_text(text: str, width: int = None) -> list:
-    """
-    Wrap text to fit within a specified width.
-    
-    Args:
-        text: Text to wrap
-        width: Maximum width (defaults to BOX_WIDTH)
-        
-    Returns:
-        List of wrapped lines
-    """
-    if width is None:
-        width = BOX_WIDTH
-    
-    return textwrap.wrap(text, width=width-4) or [""]
+# ---------------------------
+# Low-level helpers
+# ---------------------------
+def _box_border() -> str:
+    return "+" + "-" * (BOX_WIDTH - 2) + "+"
 
-def create_box(text: str, title: str = None) -> str:
-    """
-    Create a text box with optional title.
-    
-    Args:
-        text: Main text content
-        title: Optional title for the box
-        
-    Returns:
-        Formatted box as string
-    """
-    lines = wrap_text(text)
-    
-    # Create top border
-    top_border = "+" + "-" * (BOX_WIDTH - 2) + "+"
-    box_parts = [top_border]
-    
-    # Add title if provided
-    if title:
-        title_line = "| " + title.ljust(BOX_WIDTH - 4) + " |"
-        box_parts.append(title_line)
-        box_parts.append("|" + "-" * (BOX_WIDTH - 2) + "|")
-    
-    # Add content lines
-    for line in lines:
-        content_line = "| " + line.ljust(BOX_WIDTH - 4) + " |"
-        box_parts.append(content_line)
-    
-    # Add bottom border
-    box_parts.append(top_border)
-    
-    return "\n".join(box_parts)
+def _box_header(title: str) -> str:
+    """Return a small boxed header string with the given title."""
+    return f"+{'-'*(BOX_WIDTH-2)}+\n| {title.ljust(BOX_WIDTH-4)} |\n+{'-'*(BOX_WIDTH-2)}+"
 
-# ============================================================================
-# MAIN OUTPUT FUNCTIONS
-# ============================================================================
+def _wrap_lines(text: str, width: int = BOX_WIDTH - 4) -> List[str]:
+    """Wrap text to the given width and return list of lines."""
+    return textwrap.wrap(text, width=width) if text else [""]
 
-def print_boxed(title: str, text: str):
-    """
-    Print text in a box with a title.
-    
-    Args:
-        title: Title for the box
-        text: Text content to display
-    """
-    print(create_box(text, title=title))
+# ---------------------------
+# Visible UI helpers (used by main.py)
+# ---------------------------
+def print_user_box(text: str):
+    """Show the user's input inside a boxed USER header."""
+    print(_box_header("USER"))
+    for line in _wrap_lines(text):
+        print(f"| {line.ljust(BOX_WIDTH-4)} |")
+    print(_box_border())
 
-def print_user_input(text: str):
-    """
-    Print user input in a special box.
-    
-    Args:
-        text: What the user typed
-    """
-    print()
-    print(create_box(text, title="USER"))
-    print()
+def print_boxed(title: str, body: str):
+    """Show a small boxed panel with a title and a body (body may be multi-line)."""
+    print(_box_header(title))
+    for line in body.splitlines():
+        for wrapped in _wrap_lines(line):
+            print(f"| {wrapped.ljust(BOX_WIDTH-4)} |")
+    print(_box_border())
 
-def print_agent_action(tool_name: str):
-    """
-    Print when the agent is using a tool.
-    
-    Args:
-        tool_name: Name of the tool being used
-    """
-    message = f"Agent: using tool: {tool_name}"
-    print("\n" + message)
-    print("-" * len(message))
+def print_help_box():
+    """Show a short help box describing common commands (keeps it minimal)."""
+    body = (
+        "Quick help:\n"
+        "- Ask in natural language (e.g. 'change README to hello')\n"
+        "- Or call tools directly: read <path>, ls <path>, write <path> <content>\n"
+        "- 'list files' shows a recursive listing\n"
+        "- Destructive changes ask for confirmation first"
+    )
+    print_boxed("HELP", body)
 
-def print_tool_result(tool_name: str, result: Dict[str, Any]):
-    """
-    Print the result from a tool execution.
-    
-    Args:
-        tool_name: Name of the tool that was executed
-        result: Result dictionary from the tool
-    """
-    # Create header
-    success = result.get("success", False)
-    status = "OK" if success else "ERROR"
-    header = f"[{tool_name}] {status}"
-    
+def print_agent_tool_use(tool_name: str):
+    """Show which tool the agent is using (small inline header)."""
+    header = f"Agent : using tool : {tool_name}"
     print("\n" + header)
     print("-" * len(header))
-    
-    # Print output
+
+
+# ---------------------------
+# Code / file content rendering
+# ---------------------------
+def _is_likely_file_content(s: str) -> bool:
+    """
+    Heuristic to decide whether a string looks like code/file content.
+    Returns True for multi-line text that contains common code tokens.
+    """
+    if not isinstance(s, str):
+        return False
+    if "\n" not in s:
+        return False
+    indicators = ["def ", "class ", "import ", "{", ";", "function ", "=>", "console.", "printf(", "package ", "public ", "#include", "async ", "await "]
+    score = sum(1 for i in indicators if i in s)
+    return score >= 1
+
+def _print_code_block_with_line_numbers(text: str, lang: str = ""):
+    """
+    Print simple numbered code block for terminal viewing.
+    Keeps indentation intact and prints line numbers in a readable column.
+    """
+    lines = text.splitlines()
+    width = max(2, len(str(len(lines))))
+    # fence
+    print("```" + (lang or ""))
+    for i, line in enumerate(lines, start=1):
+        lineno = str(i).rjust(width)
+        print(f"{lineno} | {line.rstrip()}")
+    print("```")
+
+
+# ---------------------------
+# Main result printing (compatibility wrappers)
+# ---------------------------
+def print_result(tool_name: str, result: Dict[str, Any]):
+    """
+    Main entrypoint for printing a tool's result.
+
+    Expected result shape:
+      {"tool": "...", "success": bool, "output": ..., "args": [...], "kwargs": {...}}
+
+    This function normalizes the output and uses code-block rendering for file-like content.
+    """
+    # normalize
+    success = bool(result.get("success", False))
+    status = "OK" if success else "ERROR"
+    header = f"[{tool_name}] {status}"
+    print("\n" + header)
+    print("-" * len(header))
+
     output_data = result.get("output")
+
+    # Structured dict/list -> pretty JSON
     if isinstance(output_data, (dict, list)):
         try:
-            print(json.dumps(output_data, indent=2))
-        except (TypeError, ValueError):
+            pretty = json.dumps(output_data, indent=2)
+            print(pretty)
+        except Exception:
             print(str(output_data))
+        print("-" * len(header))
+        return
+
+    # If tool output itself is a string that looks like file content -> render as code
+    if isinstance(output_data, str) and _is_likely_file_content(output_data):
+        _print_code_block_with_line_numbers(output_data)
+        print("-" * len(header))
+        return
+
+    # If write/edit succeeded and args[0] is a path, try to preview the file we wrote
+    if tool_name.lower() in ("write", "edit", "multiedit") and success:
+        args = result.get("args", []) or []
+        if len(args) >= 1 and isinstance(args[0], str):
+            target = args[0]
+            try:
+                p = Path(target)
+                if not p.is_absolute():
+                    p = Path.cwd() / p
+                if p.exists():
+                    try:
+                        content = p.read_text(encoding="utf-8", errors="replace")
+                        # print a small header to indicate file preview
+                        print(f"File preview: {os.path.relpath(p, Path.cwd())}")
+                        if _is_likely_file_content(content):
+                            _print_code_block_with_line_numbers(content)
+                        else:
+                            # for non-code text show the first N lines
+                            preview = "\n".join(content.splitlines()[:200])
+                            print(preview)
+                    except Exception as e:
+                        print(f"Note: wrote to {target} (but couldn't read file for preview: {e})")
+                else:
+                    # file doesn't exist: fall back to printing tool output message
+                    print(str(output_data or ""))
+            except Exception:
+                print(str(output_data or ""))
+            print("-" * len(header))
+            return
+
+    # Default: print a short textual representation
+    if output_data is None:
+        print("(no output)")
     else:
-        print(textwrap.fill(str(output_data or ""), width=BOX_WIDTH))
-    
-    # Print metadata if present
-    meta = result.get("meta")
-    if meta:
-        print("\nMeta:")
-        print(json.dumps(meta, indent=2))
-    
-    print("-" * len(header) + "\n")
+        out_str = str(output_data)
+        if len(out_str) > BOX_WIDTH * 6:
+            preview = "\n".join(out_str.splitlines()[:200])
+            print(preview)
+            print("... (output truncated)")
+        else:
+            for line in out_str.splitlines():
+                for wrapped in _wrap_lines(line):
+                    print(wrapped)
+    print("-" * len(header))
 
+
+# Backwards-compat: some code calls print_tool_result/print_agent_action names
+def print_tool_result(tool_name: str, result: Dict[str, Any]):
+    """Compatibility wrapper (old name)."""
+    print_result(tool_name, result)
+
+def print_agent_action(tool_name: str):
+    """Compatibility wrapper (old name)."""
+    print_agent_tool_use(tool_name)
+
+
+# ---------------------------
+# Error and misc helpers
+# ---------------------------
 def print_error(message: str):
-    """
-    Print an error message.
-    
-    Args:
-        message: Error message to display
-    """
-    print("\n[ERROR]")
-    print(message)
-    print()
+    """Pretty-print errors in a boxed format."""
+    border = "+" + "-" * (BOX_WIDTH - 2) + "+"
+    print("\n" + border)
+    title = "| " + "ERROR".ljust(BOX_WIDTH - 4) + " |"
+    print(title)
+    print(border)
+    for line in message.splitlines():
+        for wrapped in _wrap_lines(line):
+            print("| " + wrapped.ljust(BOX_WIDTH - 4) + " |")
+    print(border + "\n")
 
-def print_help():
-    """
-    Print help information in a formatted box.
-    """
-    help_content = (
-        "Commands:\n"
-        "  help              Show this help\n"
-        "  exit              Exit the program\n"
-        "  list files        List all files in the repository\n"
-        "\n"
-        "Natural language examples:\n"
-        "  'read main.py'                    - Read a file\n"
-        "  'find all TODO comments'          - Search for text\n"
-        "  'create a new file called test.py' - Create a file\n"
-        "  'edit main.py to add a comment'   - Edit a file\n"
-        "\n"
-        "Direct tool commands:\n"
-        "  read filename     - Read a file\n"
-        "  grep pattern      - Search for text\n"
-        "  ls [directory]    - List files\n"
-        "  write file content - Create a file"
-    )
-    print_boxed("HELP", help_content)
+def print_agent_message(msg: str):
+    """Generic short message from the agent (not a tool result)."""
+    print_boxed("AGENT", msg)

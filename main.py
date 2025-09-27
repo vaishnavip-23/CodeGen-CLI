@@ -2,15 +2,14 @@
 """
 main.py - CLI coding agent (updated)
 
-Fixes included in this version:
-- Avoids shlex.split on freeform natural language to prevent "No closing quotation" errors.
-  Uses simple whitespace splitting for token detection.
-- Special-cases the common "list files" command and returns a recursive listing of the repo,
-  ignoring noisy directories (.git, node_modules, __pycache__, .venv, .env).
-- Keeps LLM plan generation, Write->Edit conversion, confirmation for destructive steps,
-  and dispatch via call_tools.dispatch_tool.
+This file implements:
+- REPL for natural language and direct tool invocations
+- Plan generation via Gemini (google.genai) client
+- Plan validation, confirmation for destructive steps
+- Conservative Write->Edit conversion when user intent suggests "change"
+- History persistence in history.json
 
-Drop-in replacement: copy this file to your repo (replace existing main.py) and run.
+Note: This version uses output.print_user_box(...) (backwards-compatible name).
 """
 
 import os
@@ -365,9 +364,7 @@ def parse_as_tool_invocation(line: str):
     kwargs = {}
     # Special-case: if user typed "list files" or "list all files", handle separately
     if tool.lower() in ("list",) and len(args) >= 1 and args[0].lower().startswith("file"):
-        # Turn into LS invocation that we may override with recursive listing
         return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
-    # If tool is ls and no args given, set default to recursive listing via args
     if tool.lower() == "ls" and not args:
         return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
     return {"tool": tool, "args": args, "kwargs": kwargs}
@@ -396,7 +393,6 @@ def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) ->
             rel_dir = ""
         # add files
         for fn in filenames:
-            # skip hidden env files if desired
             if fn in (".env",):
                 continue
             full = os.path.join(dirpath, fn)
@@ -407,7 +403,6 @@ def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) ->
 
 def print_recursive_listing():
     files = list_repo_files_recursive(".")
-    # print in a boxed output using output helper if available
     try:
         output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
     except Exception:
@@ -447,7 +442,6 @@ def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[st
                 if not p.is_absolute():
                     p = Path.cwd() / p
                 if p.exists():
-                    # try to read via dispatch_tool read (respects repo ignores)
                     read_res = dispatch_tool({"tool": "read", "args": [str(target)]})
                     existing = ""
                     if isinstance(read_res, dict) and read_res.get("success"):
@@ -498,7 +492,7 @@ def repl():
         low = line.strip().lower()
         if low in ("help", "--help", "-h"):
             try:
-                output.print_help()
+                output.print_help_box()
             except Exception:
                 print("Help: try natural language or tool invocations like 'read README.md' or 'list files'.")
             continue
@@ -516,7 +510,7 @@ def repl():
         if low.startswith("todo "):
             parsed = parse_as_tool_invocation("todowrite " + line[len("todo "):])
             res = dispatch_tool(parsed)
-            output.print_tool_result(parsed.get("tool"), res)
+            output.print_result(parsed.get("tool"), res)
             append_history(line, parsed, [res])
             continue
 
@@ -529,24 +523,23 @@ def repl():
 
             # if ls with args empty default to recursive listing
             if parsed.get("tool", "").lower() == "ls":
-                # attempt to run the repo's ls tool; if it seems non-recursive, fall back to our own printer
                 try:
                     res = dispatch_tool(parsed)
-                    # If the result looks shallow (list of top-level), still show it but also offer recursive hint
-                    output.print_tool_result(parsed.get("tool"), res)
+                    output.print_result(parsed.get("tool"), res)
                     append_history(line, parsed, [res])
                 except Exception as e:
                     output.print_error(f"LS tool failed: {e}")
                 continue
 
             results = dispatch_tool(parsed)
-            output.print_tool_result(parsed.get("tool"), results)
+            output.print_result(parsed.get("tool"), results)
             append_history(line, parsed, [results])
             continue
 
         # Natural language path
         user_text = line
-        output.print_user_input(user_text)
+        # <-- changed here: use print_user_box (Option A)
+        output.print_user_box(user_text)
 
         # Small talk handled locally
         if handle_small_talk(user_text):
@@ -606,12 +599,12 @@ def repl():
         if isinstance(results, list):
             for r in results:
                 tool_name = r.get("tool", "<unknown>")
-                output.print_agent_action(tool_name)
-                output.print_tool_result(tool_name, r)
+                output.print_agent_tool_use(tool_name)
+                output.print_result(tool_name, r)
         else:
             tool_name = results.get("tool", "<unknown>")
-            output.print_agent_action(tool_name)
-            output.print_tool_result(tool_name, results)
+            output.print_agent_tool_use(tool_name)
+            output.print_result(tool_name, results)
 
         append_history(user_text, plan, results if isinstance(results, list) else [results])
 
