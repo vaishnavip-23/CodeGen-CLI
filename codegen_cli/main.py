@@ -670,7 +670,7 @@ def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v", "version"):
-            print("CodeGen CLI v0.1.0")
+            print("CodeGen CLI v0.1.3")
             print("Universal CLI coding agent that understands any codebase")
             return
         elif arg in ("--help", "-h", "help"):
