@@ -6,13 +6,24 @@ It supports adding, listing, removing, and clearing todos.
 """
 
 import os
+from pathlib import Path
 import json
 from typing import List, Dict, Any
 
-# Get workspace and database paths
-WORKSPACE = os.getcwd()
-DB_DIR = os.path.join(WORKSPACE, "db")
-DB_FILE = os.path.join(DB_DIR, "todos.json")
+# Resolve persistent storage location (user config by default)
+def _resolve_db_paths():
+    env_override = os.environ.get("CODEGEN_TODOS_PATH")
+    if env_override:
+        p = Path(env_override)
+        return p.parent, p
+    # Always use user config dir by default
+    db_dir = Path.home() / ".config" / "codegen"
+    db_file = db_dir / "todos.json"
+    return db_dir, db_file
+
+DB_DIR_P, DB_FILE_P = _resolve_db_paths()
+DB_DIR = str(DB_DIR_P)
+DB_FILE = str(DB_FILE_P)
 
 def ensure_database():
     """

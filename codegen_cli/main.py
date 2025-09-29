@@ -105,7 +105,20 @@ WORKSPACE_ROOT = os.getcwd()
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 SYSTEM_PROMPT_PATH = os.path.join(PACKAGE_DIR, "config", "system_prompt.txt")
 BEHAVIOR_PATH = os.path.join(PACKAGE_DIR, "config", "behavior.md")
-HISTORY_PATH = os.path.join(WORKSPACE_ROOT, "history.json")
+
+# History storage: write to user config dir by default (project-local disabled)
+def _resolve_history_path() -> str:
+    env_override = os.environ.get("CODEGEN_HISTORY_PATH")
+    if env_override:
+        return env_override
+    user_cfg = os.path.join(Path.home(), ".config", "codegen")
+    try:
+        os.makedirs(user_cfg, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(user_cfg, "history.json")
+
+HISTORY_PATH = _resolve_history_path()
 
 # Project type detection
 def detect_project_type(workspace_path: str) -> dict:
@@ -206,6 +219,10 @@ def append_history(user_text: str, agent_plan: Any, results: Any):
     hist = load_history(limit=1000)
     hist.append(entry)
     try:
+        # Ensure parent exists
+        parent = os.path.dirname(HISTORY_PATH)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(HISTORY_PATH, "w", encoding="utf-8") as f:
             json.dump(hist, f, indent=2)
     except Exception:
@@ -642,6 +659,34 @@ def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[st
         new_steps.append(step)
     plan["steps"] = new_steps
     return plan
+
+# ---------------------------
+# Plan Post-Processing Filters
+# ---------------------------
+def filter_invalid_read_steps(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove read steps that target non-existent files.
+
+    This prevents attempts to read files that aren't present (e.g., README.md when missing).
+    """
+    try:
+        steps = plan.get("steps", [])
+        filtered = []
+        for s in steps:
+            if not isinstance(s, dict):
+                filtered.append(s)
+                continue
+            tool = s.get("tool", "").lower()
+            args = s.get("args", []) or []
+            if tool == "read" and args:
+                target = args[0]
+                if isinstance(target, str) and not os.path.exists(target):
+                    # skip this read step
+                    continue
+            filtered.append(s)
+        plan["steps"] = filtered
+        return plan
+    except Exception:
+        return plan
 
 # ---------------------------
 # Main REPL

@@ -33,7 +33,7 @@ def is_safe_path(path: str) -> bool:
     except Exception:
         return False
 
-def call(path: str, *args, **kwargs) -> Dict[str, Any]:
+def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
     """
     Delete a file or directory.
     
@@ -45,15 +45,28 @@ def call(path: str, *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Dictionary with success status and result
     """
+    # Allow dispatcher to pass a suggested path for confirmation
+    suggested = kwargs.pop("suggested_path", None)
+
     # Validate path
-    if not path or not isinstance(path, str):
+    if (not path or not isinstance(path, str)) and not suggested:
         return {
             "tool": "delete",
             "success": False,
-            "output": "Path is required and must be a string.",
+            "output": "Path is required. If you meant a file by name, try specifying it.",
             "args": [path],
             "kwargs": kwargs
         }
+
+    # If no explicit path but a suggestion exists, ask for confirmation interactively
+    if (not path or not isinstance(path, str)) and suggested:
+        try:
+            ans = input(f"Did you mean to delete '{suggested}'? (y/n) ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = "n"
+        if ans not in ("y", "yes"):
+            return {"tool": "delete", "success": False, "output": "Deletion cancelled.", "args": [suggested], "kwargs": {}}
+        path = suggested
     
     # Check if path is safe
     if not is_safe_path(path):

@@ -37,9 +37,9 @@ def handle_small_talk(user_text: str, append_history: Callable[[str, dict, list]
         append_history(user_text, {"steps": [], "explain": "thanks"}, [])
         return True
 
-    # Capabilities
-    if "what can you do" in s or "what do you do" in s or "capabilities" in s:
-        reply = """# CodeGen CLI - Capabilities
+    # Capabilities (hardcoded answer; no LLM needed)
+    if ("what can you do" in s) or ("what all can you do" in s) or ("what do you do" in s) or ("capabilities" in s):
+        reply = """# CodeGen CLI - Capabilities (Quick Overview)
 
 ## Core Functionality
 I am a repository-aware CLI coding assistant that can interact with your codebase through natural language commands.
@@ -64,7 +64,16 @@ I am a repository-aware CLI coding assistant that can interact with your codebas
 - Codebase analysis
 
 ## Safety Features
-- Path protection, confirmation for destructive changes, and safe command handling."""
+- Path protection, confirmation for destructive changes, and safe command handling
+
+Try commands like:
+- list files
+- read README.md
+- write hello.py print("hello")
+- edit hello.py change hello to hi
+- grep TODO in .
+- delete the hello.py file
+"""
         print("Assistant:", reply)
         append_history(user_text, {"steps": [], "explain": "capabilities_reply"}, [])
         return True

@@ -164,6 +164,16 @@ def run_repl(deps: Dict[str, Any]) -> None:
         if faq_handlers.handle_small_talk(user_text, append_history):
             continue
 
+        # Shortcut: common summaries -> Task tool directly (no LLM)
+        lowered = user_text.lower().strip()
+        if any(k in lowered for k in ("summarize the repo", "summarize repository", "summarize project", "analyze repo", "analyze repository")):
+            task_plan = {"steps": [{"tool": "task", "args": ["summarize repo", "", "general-purpose"], "kwargs": {}}]}
+            results = dispatch_tool(task_plan)
+            output.print_agent_action("Task")
+            output.print_tool_result("Task", results if isinstance(results, dict) else results[0])
+            append_history(user_text, task_plan, results if isinstance(results, list) else [results])
+            continue
+
         ok, plan_or_err = generate_plan(user_text, retries=1)
         if not ok:
             output.print_error(f"LLM plan generation failed: {plan_or_err}")
@@ -205,6 +215,8 @@ def run_repl(deps: Dict[str, Any]) -> None:
 
         plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
         plan_for_dispatch = maybe_convert_write_to_edit(plan_for_dispatch, user_text)
+        from .main import filter_invalid_read_steps  # local import to avoid cycle at module load
+        plan_for_dispatch = filter_invalid_read_steps(plan_for_dispatch)
 
         to_dispatch = {"steps": plan_for_dispatch.get("steps", [])}
         results = dispatch_tool(to_dispatch)

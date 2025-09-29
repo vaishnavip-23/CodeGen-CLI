@@ -142,6 +142,24 @@ def _normalize_args(tool_name: str, args, kwargs):
         path = pick_path(candidates)
         if path:
             return [path] + ([] if name in ("delete", "read") else cleaned[1:])
+        # If delete and no direct path, attempt a filesystem search for likely file
+        if name == "delete":
+            import os
+            found = None
+            tokens = [c.lower() for c in candidates if c]
+            for dirpath, dirnames, filenames in os.walk(os.getcwd()):
+                dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+                for fn in filenames:
+                    low = fn.lower()
+                    if any(t in low for t in tokens):
+                        found = os.path.relpath(os.path.join(dirpath, fn), os.getcwd())
+                        break
+                if found:
+                    break
+            if found:
+                if isinstance(kwargs, dict):
+                    kwargs.setdefault("suggested_path", found)
+                return args
         return args
 
     if name == "write" and cleaned:
