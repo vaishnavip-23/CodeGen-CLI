@@ -1,3 +1,11 @@
+# Local temp test dirs
+.tmp_cli_test/
+.tmp_llm_prompts/
+.tmp_multiedit/
+tests/llm_runs/
+
+# Local artifacts not needed in repo root
+history.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
