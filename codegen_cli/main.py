@@ -11,15 +11,72 @@ import json
 import traceback
 from datetime import datetime
 from typing import Tuple, Any, Dict, List
+from pathlib import Path
 
 # Load environment variables
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+def _try_parse_env_file(path: Path) -> Dict[str, str]:
+    """Parse simple .env files supporting lines like KEY=VALUE or export KEY=VALUE.
+
+    Returns a mapping of keys to values. Ignores comments and blank lines.
+    """
+    env: Dict[str, str] = {}
+    try:
+        if not path.exists() or not path.is_file():
+            return env
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.lower().startswith("export "):
+                    line = line[len("export "):].strip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    env[key] = value
+    except Exception:
+        # Best-effort only
+        return {}
+    return env
+
+def _load_additional_env():
+    """Load environment variables from project and user locations if not already set.
+
+    Load order (first non-empty wins for GEMINI_API_KEY):
+      1) Existing process environment
+      2) Project .env (cwd/.env)
+      3) User .env (~/\.env)
+      4) User config .env (~/.config/codegen/.env)
+    """
+    # Try python-dotenv if present (loads cwd/.env by default)
+    try:
+        from dotenv import load_dotenv  # type: ignore
+        load_dotenv()
+    except Exception:
+        pass
+
+    # If key still missing, try additional files
+    if not os.environ.get("GEMINI_API_KEY"):
+        cwd_env = _try_parse_env_file(Path.cwd() / ".env")
+        if cwd_env.get("GEMINI_API_KEY"):
+            os.environ.setdefault("GEMINI_API_KEY", cwd_env["GEMINI_API_KEY"])
+
+    if not os.environ.get("GEMINI_API_KEY"):
+        home = Path.home()
+        home_env = _try_parse_env_file(home / ".env")
+        if home_env.get("GEMINI_API_KEY"):
+            os.environ.setdefault("GEMINI_API_KEY", home_env["GEMINI_API_KEY"])
+
+    if not os.environ.get("GEMINI_API_KEY"):
+        cfg_env = _try_parse_env_file(Path.home() / ".config" / "codegen" / ".env")
+        if cfg_env.get("GEMINI_API_KEY"):
+            os.environ.setdefault("GEMINI_API_KEY", cfg_env["GEMINI_API_KEY"])
 
 # Initialize Gemini API client
+_load_additional_env()
 try:
     from google import genai
 except ImportError:
@@ -27,11 +84,20 @@ except ImportError:
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
 CLIENT = None
-if genai and API_KEY:
-    try:
-        CLIENT = genai.Client(api_key=API_KEY)
-    except Exception:
-        CLIENT = None
+
+def _ensure_client():
+    """Ensure a genai client exists if possible. Refreshes API_KEY from env."""
+    global CLIENT, API_KEY
+    if CLIENT is not None:
+        return CLIENT
+    _load_additional_env()
+    API_KEY = os.environ.get("GEMINI_API_KEY")
+    if genai and API_KEY:
+        try:
+            CLIENT = genai.Client(api_key=API_KEY)
+        except Exception:
+            CLIENT = None
+    return CLIENT
 
 # File paths
 WORKSPACE_ROOT = os.getcwd()
@@ -107,6 +173,8 @@ PROJECT_INFO = detect_project_type(WORKSPACE_ROOT)
 # Import local modules
 from .call_tools import dispatch_tool
 from . import output
+from . import faq as faq_handlers
+from .repl import run_repl
 
 # Tools that can modify files
 DESTRUCTIVE_TOOLS = {"write", "edit", "multiedit", "bash", "delete", "Write", "Edit", "MultiEdit", "Bash", "Delete"}
@@ -179,17 +247,13 @@ def _load_system_behavior_and_history(history_limit: int = 8):
 
 def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperature: float = 0.0) -> Tuple[str, str]:
     """Call Gemini API to generate a structured plan."""
-    if CLIENT is None:
+    client = _ensure_client()
+    if client is None:
         if genai is None:
-            return ("ERROR:NO_CLIENT", "google.genai not available. Install google-genai==1.12.1.")
-        if not API_KEY:
-            return ("ERROR:NO_KEY", "GEMINI_API_KEY not set in environment or .env.")
-        try:
-            client = genai.Client(api_key=API_KEY)
-        except Exception as e:
-            return ("ERROR:CLIENT_INIT", f"Failed to init genai.Client: {e}")
-    else:
-        client = CLIENT
+            return ("ERROR:NO_CLIENT", "google.genai not available. Install google-genai.")
+        if not os.environ.get("GEMINI_API_KEY"):
+            return ("ERROR:NO_KEY", "GEMINI_API_KEY not set. Run 'codegen --set-key' in your terminal or add it to .env.")
+        return ("ERROR:CLIENT_INIT", "Failed to initialize Gemini client. Check your API key.")
 
     system_text, behavior_text, history_block = _load_system_behavior_and_history(history_limit=8)
 
@@ -221,6 +285,13 @@ def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperatu
             config={"temperature": float(temperature), "max_output_tokens": int(max_output_tokens)}
         )
     except Exception as e:
+        msg = str(e)
+        # Friendly handling for common free-tier/rate-limit errors
+        rate_markers = [
+            "rate limit", "429", "quota", "Resource has been exhausted", "Too Many Requests"
+        ]
+        if any(m.lower() in msg.lower() for m in rate_markers):
+            return ("ERROR:RATE_LIMIT", "You've hit the free-tier rate limit. Please wait a minute and try again, or set a paid quota in Google AI Studio.")
         return ("ERROR:CALL_FAILED", f"LLM call failed: {e}\n{traceback.format_exc()}")
 
     try:
@@ -356,6 +427,19 @@ def handle_small_talk(user_text: str) -> bool:
     if s in {"thanks", "thank you", "thx", "ty", "appreciate it", "thanks!"}:
         print("Assistant: You're welcome! Happy to help. Anything else you'd like to work on?")
         append_history(user_text, {"steps": [], "explain": "thanks"}, [])
+        return True
+
+    # API key status questions
+    api_markers = ("api key", "apikey", "gemini key", "gemini api", "gemini")
+    status_markers = ("set", "configured", "present", "available", "loaded", "right", "proper")
+    if any(m in s for m in api_markers) and ("set" in s or "configured" in s or "present" in s or "loaded" in s or "right" in s or "proper" in s or "ok" in s):
+        has_key = bool(os.environ.get("GEMINI_API_KEY"))
+        if has_key:
+            print("Assistant: Yes — GEMINI_API_KEY is set and will be used. 'codegen --set-key' is a one-time user-level setup and can be run from any directory.")
+            append_history(user_text, {"steps": [], "explain": "api_key_status_yes"}, [])
+        else:
+            print("Assistant: No — GEMINI_API_KEY is not set. Run 'codegen --set-key' in your terminal or add it to your .env.")
+            append_history(user_text, {"steps": [], "explain": "api_key_status_no"}, [])
         return True
 
     if "what can you do" in s or "what do you do" in s or "capabilities" in s:
@@ -562,151 +646,21 @@ def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[st
 # ---------------------------
 # Main REPL
 # ---------------------------
-def print_intro():
-    """Print welcome message with project information."""
-    print("🚀 CodeGen CLI - Universal Coding Agent")
-    print("=" * 50)
-    print(f"Workspace: {WORKSPACE_ROOT}")
-    print(f"Language: {PROJECT_INFO['language']}")
-    if PROJECT_INFO['package_manager']:
-        print(f"Package Manager: {PROJECT_INFO['package_manager']}")
-    print("Type 'help' for help. Non-destructive steps run immediately. Destructive steps require confirmation.")
-    print("=" * 50)
-
 def repl():
-    """Main read-eval-print loop."""
-    print_intro()
-    while True:
-        try:
-            line = input("\n>>> ")
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting.")
-            break
-        if line is None:
-            continue
-        line = line.rstrip("\n")
-        if not line.strip():
-            continue
-
-        # Handle special commands
-        low = line.strip().lower()
-        if low in ("help", "--help", "-h"):
-            try:
-                output.print_help(PROJECT_INFO)
-            except Exception:
-                print("Help: try natural language or tool invocations like 'read README.md' or 'list files'.")
-            continue
-        if low in ("exit", "quit"):
-            print("Bye.")
-            break
-
-        # Handle "list files" command
-        if low in ("list files", "list all files", "ls -r", "ls -R"):
-            print_recursive_listing()
-            append_history(line, {"steps": [], "explain": "list_files_recursive"}, [])
-            continue
-
-
-        # Handle "todo" shortcut
-        if low.startswith("todo "):
-            parsed = parse_as_tool_invocation("todowrite " + line[len("todo "):])
-            res = dispatch_tool(parsed)
-            output.print_tool_result(parsed.get("tool"), res)
-            append_history(line, parsed, [res])
-            continue
-
-        # Handle direct tool invocations
-        if not is_likely_natural_language(line):
-            parsed = parse_as_tool_invocation(line)
-            if parsed is None:
-                output.print_error("Could not parse tool invocation.")
-                continue
-
-            # Handle ls command
-            if parsed.get("tool", "").lower() == "ls":
-                try:
-                    res = dispatch_tool(parsed)
-                    output.print_tool_result(parsed.get("tool"), res)
-                    append_history(line, parsed, [res])
-                except Exception as e:
-                    output.print_error(f"LS tool failed: {e}")
-                continue
-
-            results = dispatch_tool(parsed)
-            output.print_tool_result(parsed.get("tool"), results)
-            append_history(line, parsed, [results])
-            continue
-
-        # Handle natural language
-        user_text = line
-        output.print_user_input(user_text)
-
-        # Handle small talk
-        if handle_small_talk(user_text):
-            continue
-
-        # Generate plan
-        ok, plan_or_err = generate_plan(user_text, retries=1)
-        if not ok:
-            output.print_error(f"LLM plan generation failed: {plan_or_err}")
-            append_history(user_text, {"error": str(plan_or_err)}, [])
-            continue
-        plan = plan_or_err
-
-        # Handle empty plans
-        if isinstance(plan, dict) and isinstance(plan.get("steps"), list) and len(plan.get("steps")) == 0:
-            explain = plan.get("explain", "").strip()
-            if explain:
-                print("Assistant:", explain)
-                append_history(user_text, plan, [])
-                continue
-
-        # Check for destructive steps
-        destructive = []
-        for i, s in enumerate(plan.get("steps", []), start=1):
-            tool_name = s.get("tool", "").lower() if isinstance(s, dict) else ""
-            if tool_name in DESTRUCTIVE_TOOLS:
-                destructive.append((i, s))
-
-        run_full_plan = True
-        if destructive:
-            output.print_boxed("Plan Summary (before execution)", plan.get("explain", "(no explain)"))
-            print("Can I make these changes?")
-            for idx, step in destructive:
-                print(f"  {idx}. {step.get('tool')} args={step.get('args')}")
-            ans = input("(y/n) ").strip().lower()
-            if ans not in ("y", "yes"):
-                run_full_plan = False
-
-        steps_to_run = plan.get("steps", [])
-        if not run_full_plan and destructive:
-            steps_to_run = [s for s in steps_to_run if not (isinstance(s, dict) and s.get("tool", "").lower() in DESTRUCTIVE_TOOLS)]
-            if not steps_to_run:
-                print("No non-destructive steps to run. Skipping.")
-                append_history(user_text, plan, [])
-                continue
-            print("Running non-destructive steps only (destructive skipped).")
-
-        # Convert Write to Edit if needed
-        plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
-        plan_for_dispatch = maybe_convert_write_to_edit(plan_for_dispatch, user_text)
-
-        # Execute plan
-        to_dispatch = {"steps": plan_for_dispatch.get("steps", [])}
-        results = dispatch_tool(to_dispatch)
-
-        # Print results
-        if isinstance(results, list):
-            for r in results:
-                tool_name = r.get("tool", "<unknown>")
-                output.print_agent_action(tool_name)
-                output.print_tool_result(tool_name, r)
-        else:
-            tool_name = results.get("tool", "<unknown>")
-            output.print_agent_action(tool_name)
-            output.print_tool_result(tool_name, results)
-
-        append_history(user_text, plan, results if isinstance(results, list) else [results])
+    deps = {
+        "workspace_root": WORKSPACE_ROOT,
+        "project_info": PROJECT_INFO,
+        "dispatch_tool": dispatch_tool,
+        "output": output,
+        "faq_handlers": faq_handlers,
+        "append_history": append_history,
+        "list_repo_files_recursive": list_repo_files_recursive,
+        "maybe_convert_write_to_edit": maybe_convert_write_to_edit,
+        "generate_plan": generate_plan,
+        "destructive_tools": DESTRUCTIVE_TOOLS,
+        "ensure_client": _ensure_client,
+    }
+    run_repl(deps)
 
 def main():
     """Main entry point with command line argument support."""
@@ -726,9 +680,11 @@ def main():
             print("  codegen                    # Start interactive CLI")
             print("  codegen --help            # Show this help")
             print("  codegen --version         # Show version")
+            print("  codegen --set-key [KEY]   # Save GEMINI_API_KEY to user config")
             print("")
             print("Setup Required:")
-            print("  • Set GEMINI_API_KEY: export GEMINI_API_KEY=\"your-api-key\"")
+            print("  • Run 'codegen --set-key' and paste your Gemini API key")
+            print("  • Or set GEMINI_API_KEY via shell export or .env files")
             print("  • Get API key from: https://aistudio.google.com/api-keys")
             print("")
             print("Features:")
@@ -736,6 +692,36 @@ def main():
             print("  • Natural language interface")
             print("  • Smart project detection")
             print("  • Safety-first approach")
+            return
+        elif arg in ("--set-key", "set-key"):
+            # Accept key from argv or prompt interactively
+            key = None
+            if len(sys.argv) >= 3 and sys.argv[2]:
+                key = sys.argv[2]
+            if not key:
+                try:
+                    key = input("Enter your Gemini API key: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print("Aborted.")
+                    return
+            if not key:
+                print("No key provided.")
+                return
+            cfg_dir = Path.home() / ".config" / "codegen"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            cfg_file = cfg_dir / ".env"
+            try:
+                with cfg_file.open("w", encoding="utf-8") as f:
+                    f.write(f"GEMINI_API_KEY={key}\n")
+                print(f"Saved API key to {cfg_file}")
+                # Update current process env and client
+                os.environ["GEMINI_API_KEY"] = key
+                global API_KEY
+                API_KEY = key
+                _ensure_client()
+                print("You're all set! Run 'codegen' in any project.")
+            except Exception as e:
+                print(f"Failed to save API key: {e}")
             return
         else:
             print(f"Unknown option: {arg}")

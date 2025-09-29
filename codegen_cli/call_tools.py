@@ -7,6 +7,7 @@ Handles calling individual tool modules and provides safety checks for file oper
 import importlib
 import traceback
 from typing import Any, Dict
+import os
 
 def _load_tool_module(name: str):
     """Load a tool module by name."""
@@ -103,6 +104,81 @@ def _check_write_safety(args, kwargs):
     
     return True, None
 
+def _looks_like_path(token: str) -> bool:
+    """Heuristic to detect a path-like token from natural phrases."""
+    if not isinstance(token, str):
+        return False
+    t = token.strip().strip(",.!")
+    if not t:
+        return False
+    return "/" in t or "." in t or os.path.exists(t)
+
+def _normalize_args(tool_name: str, args, kwargs):
+    """Normalize arguments for certain tools when users type natural phrases.
+
+    Heuristics only; keeps original args if we can't confidently improve them.
+    """
+    if not isinstance(args, list):
+        return args
+    name = tool_name.lower()
+    stopwords = {"the", "a", "an", "file", "folder", "directory", "named", "called"}
+    linkers = {"with", "containing", "that", "says", "content", "text"}
+
+    tokens = [str(a) for a in args]
+    cleaned = [t.strip().strip(",.!") for t in tokens if t.strip()]
+
+    # Helper: pick first path-like candidate
+    def pick_path(cands):
+        for c in cands:
+            if _looks_like_path(c):
+                return c
+        for c in cands:
+            if "." in c:
+                return c
+        return cands[0] if cands else None
+
+    if name in ("delete", "read", "ls", "glob") and cleaned:
+        candidates = [c for c in cleaned if c.lower() not in stopwords]
+        path = pick_path(candidates)
+        if path:
+            return [path] + ([] if name in ("delete", "read") else cleaned[1:])
+        return args
+
+    if name == "write" and cleaned:
+        candidates = [c for c in cleaned if c.lower() not in stopwords]
+        path = pick_path(candidates)
+        if path:
+            # content = remaining tokens excluding path and stop/linker words
+            remaining = [c for c in candidates if c != path and c.lower() not in linkers]
+            content = " ".join(remaining).strip()
+            return [path] + ([content] if content else [])
+        return args
+
+    if name == "edit" and cleaned:
+        # Expect: path, old, new (best-effort: extract path first)
+        candidates = [c for c in cleaned if c.lower() not in stopwords]
+        path = pick_path(candidates)
+        if path:
+            rest = [c for c in candidates if c != path]
+            return [path] + rest
+        return args
+
+    if name == "grep" and cleaned:
+        # Pattern [in PATH]
+        if "in" in [c.lower() for c in cleaned]:
+            idx = [c.lower() for c in cleaned].index("in")
+            pattern = " ".join(cleaned[:idx]).strip()
+            after = cleaned[idx+1:]
+            path = pick_path([c for c in after if c.lower() not in stopwords])
+            if pattern and path:
+                # our grep tool expects pattern first; path passed via kwargs in our dispatcher
+                if isinstance(kwargs, dict):
+                    kwargs.setdefault("path", path)
+                return [pattern]
+        return args
+
+    return args
+
 def dispatch_tool(plan: Dict[str, Any]) -> Any:
     """
     Execute a tool plan and return results.
@@ -116,12 +192,22 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
     if not isinstance(plan, dict):
         return {"tool": "unknown", "success": False, "output": "Invalid plan format", "args": [], "kwargs": {}}
     
-    steps = plan.get("steps", [])
+    # Support both {tool, args, kwargs} and {steps: [...]} formats
+    if "tool" in plan and isinstance(plan.get("tool"), str):
+        steps = [
+            {
+                "tool": plan.get("tool"),
+                "args": plan.get("args", []),
+                "kwargs": plan.get("kwargs", {}),
+            }
+        ]
+    else:
+        steps = plan.get("steps", [])
     if not isinstance(steps, list):
         return {"tool": "unknown", "success": False, "output": "Plan must contain steps list", "args": [], "kwargs": {}}
     
     if not steps:
-        return {"tool": "unknown", "success": True, "output": "No steps to execute", "args": [], "kwargs": {}}
+        return {"tool": plan.get("tool", "unknown"), "success": True, "output": "No steps to execute", "args": plan.get("args", []), "kwargs": plan.get("kwargs", {})}
     
     if len(steps) == 1:
         # Single step
@@ -135,6 +221,7 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
         
         try:
             module = _load_tool_module(tool_name)
+            args = _normalize_args(tool_name, args, kwargs)
             
             # Special handling for read tool
             if tool_name.lower() == "read":
@@ -215,6 +302,7 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
             
             try:
                 module = _load_tool_module(tool_name)
+                args = _normalize_args(tool_name, args, kwargs)
                 
                 # Special handling for read tool
                 if tool_name.lower() == "read":

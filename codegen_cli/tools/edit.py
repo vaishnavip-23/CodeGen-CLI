@@ -3,6 +3,7 @@ Edit tool - modifies existing files by replacing text safely within workspace.
 """
 
 import os
+import re
 
 WORKSPACE = os.getcwd()
 
@@ -20,6 +21,7 @@ def call(path: str, *args, **kwargs) -> dict:
     old_string = args[0] if len(args) > 0 else kwargs.get("old_string")
     new_string = args[1] if len(args) > 1 else kwargs.get("new_string")
     replace_all = kwargs.get("replace_all", False)
+    smart = kwargs.get("smart", True)
     
     if not is_safe_path(path):
         return {
@@ -45,6 +47,21 @@ def call(path: str, *args, **kwargs) -> dict:
             original_content = file.read()
         
         if old_string not in original_content:
+            if smart and isinstance(old_string, str):
+                # Build a forgiving regex that ignores case and allows punctuation/space between words
+                words = [w for w in re.split(r"\s+", old_string.strip()) if w]
+                if words:
+                    pattern = r"\b" + r"\W+".join(re.escape(w) for w in words) + r"\b"
+                    count = 0 if replace_all else 1
+                    new_content, n = re.subn(pattern, new_string, original_content, count=count, flags=re.IGNORECASE)
+                    if n > 0:
+                        with open(full_path, "w", encoding="utf-8") as file:
+                            file.write(new_content)
+                        rel_path = os.path.relpath(full_path, WORKSPACE)
+                        return {
+                            "success": True,
+                            "output": f"Edited {rel_path}"
+                        }
             return {
                 "success": False, 
                 "output": f"Text '{old_string}' not found in file."

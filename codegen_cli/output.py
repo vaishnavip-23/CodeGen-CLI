@@ -128,25 +128,38 @@ def print_help(project_info=None):
     
     help_text = f"""CodeGen CLI - Universal Coding Agent
 
-This is a universal command-line coding agent that understands any codebase.
-It automatically detects your project type and adapts its tools accordingly.
+This universal CLI coding agent understands any codebase.
+It auto-detects your project type and adapts tools accordingly.
 
-🔑 Setup Required:
- * Set your Gemini API key: export GEMINI_API_KEY="your-api-key"
- * Get your API key from: https://aistudio.google.com/api-keys
- * Or create a .env file with: GEMINI_API_KEY=your-api-key
+Quick Start:
+  1. codegen --set-key   (saves your key to ~/.config/codegen/.env)
+  2. codegen             (run inside your project)
+  3. Try: help, list files, read README.md
+
+API Key:
+  • Auto-loads from ./.env, ~/.env, ~/.config/codegen/.env
+  • Or export GEMINI_API_KEY in your shell
+  • Get a key at: https://aistudio.google.com/api-keys
 
 Current Project:
  * Language: {project_info['language']}
  * Package Manager: {project_info['package_manager'] or 'None detected'}
  * Description: {lang_info['description']}
 
-Core Functionality:
+Common Commands:
+  • help                      Show this help
+  • list files                List repository files
+  • read path/to/file         Print file contents
+  • grep "pattern"            Search across files
+  • write <file> <content>    Create/overwrite file (asks to confirm)
+  • edit <file>               Modify content safely
+  • delete <path>             Delete file or folder (asks to confirm)
 
- * Natural Language Interface: Give commands in plain English (e.g., "summarize the codebase," "read the main file").
- * Universal Compatibility: Works with Python, JavaScript, Go, Rust, and other languages.
- * Smart Detection: Automatically detects project type, package manager, and framework.
- * Safety First: Built-in protections prevent accidental damage to your files.
+Core Functionality:
+  • Natural language interface: "summarize the repo", "find TODOs"
+  • Universal compatibility across languages
+  • Smart project detection
+  • Safety-first changes with confirmation
 
 Available Tools:
 
@@ -156,12 +169,11 @@ Available Tools:
  * System Operations: bash commands, project management
  * Language-Specific: {lang_info['tools']}
 
-Usage Examples:
-
- * {lang_info['examples'][0]}
- * {lang_info['examples'][1]}
- * {lang_info['examples'][2]}
- * {lang_info['examples'][3] if len(lang_info['examples']) > 3 else 'analyze project'}
+Examples:
+  • {lang_info['examples'][0]}
+  • {lang_info['examples'][1]}
+  • {lang_info['examples'][2]}
+  • {lang_info['examples'][3] if len(lang_info['examples']) > 3 else 'analyze project'}
 
 Workflow:
 

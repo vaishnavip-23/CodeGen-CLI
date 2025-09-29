@@ -1,4 +1,4 @@
-from edit import call as edit_call
+from .edit import call as edit_call
 
 def call(edits):
     if not isinstance(edits, (list, tuple)):
