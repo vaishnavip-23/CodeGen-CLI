@@ -715,7 +715,12 @@ def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v", "version"):
-            print("CodeGen CLI v0.1.3")
+            try:
+                import importlib.metadata as _m
+                ver = _m.version("codegen-cli")
+            except Exception:
+                ver = "unknown"
+            print(f"CodeGen CLI v{ver}")
             print("Universal CLI coding agent that understands any codebase")
             return
         elif arg in ("--help", "-h", "help"):
