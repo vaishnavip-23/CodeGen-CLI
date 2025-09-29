@@ -164,15 +164,49 @@ def run_repl(deps: Dict[str, Any]) -> None:
         if faq_handlers.handle_small_talk(user_text, append_history):
             continue
 
-        # Shortcut: common summaries -> Task tool directly (no LLM)
+        # Shortcut: common summaries/explanations -> Task tool directly (no LLM)
         lowered = user_text.lower().strip()
-        if any(k in lowered for k in ("summarize the repo", "summarize repository", "summarize project", "analyze repo", "analyze repository")):
+        summary_triggers = (
+            "summarize the repo",
+            "summarize repository",
+            "summarize project",
+            "summarize the entire repo",
+            "summarize codebase",
+            "summarize the codebase",
+            "analyze repo",
+            "analyze repository",
+            "explain the codebase",
+            "explain the repo",
+            "explain project",
+            "what does it do",
+            "describe the repo",
+            "describe the codebase",
+            "overview of the repo",
+            "overview of the codebase",
+        )
+        if any(k in lowered for k in summary_triggers):
             task_plan = {"steps": [{"tool": "task", "args": ["summarize repo", "", "general-purpose"], "kwargs": {}}]}
             results = dispatch_tool(task_plan)
             output.print_agent_action("Task")
             output.print_tool_result("Task", results if isinstance(results, dict) else results[0])
             append_history(user_text, task_plan, results if isinstance(results, list) else [results])
             continue
+
+        # Inline code explanation: detect fenced code blocks and summarize without LLM
+        if "```" in user_text:
+            try:
+                # Extract code between first pair of fences
+                parts = user_text.split("```")
+                code_text = parts[1] if len(parts) >= 3 else ""
+                if code_text.strip():
+                    task_plan = {"steps": [{"tool": "task", "args": ["explain code", code_text, "code-summary"], "kwargs": {}}]}
+                    results = dispatch_tool(task_plan)
+                    output.print_agent_action("Task")
+                    output.print_tool_result("Task", results if isinstance(results, dict) else results[0])
+                    append_history(user_text, task_plan, results if isinstance(results, list) else [results])
+                    continue
+            except Exception:
+                pass
 
         ok, plan_or_err = generate_plan(user_text, retries=1)
         if not ok:
