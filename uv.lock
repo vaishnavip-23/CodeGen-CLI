@@ -123,7 +123,7 @@ wheels = [
 
 [[package]]
 name = "codegen-cli"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -135,9 +135,9 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.5" },
-    { name = "google-genai", specifier = "==1.12.1" },
-    { name = "python-dotenv", specifier = "==1.1.0" },
-    { name = "requests", specifier = "==2.32.3" },
+    { name = "google-genai", specifier = ">=1.9.0,<2.0.0" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "requests", specifier = ">=2.32.0" },
 ]
 
 [[package]]
