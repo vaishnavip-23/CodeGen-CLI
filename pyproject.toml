@@ -1,12 +1,61 @@
 [project]
-name = "codegen2"
-version = "0.1.0"
-description = "CLI coding agent that understands natural language and interacts with your codebase"
-readme = "README.md"
+name = "codegen-cli"
+version = "0.1.1"
+description = "Universal CLI coding agent that understands any codebase through natural language"
+readme = "docs/README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "CodeGen CLI Team", email = "codegen-cli@example.com"}
+]
+maintainers = [
+    {name = "CodeGen CLI Team", email = "codegen-cli@example.com"}
+]
+keywords = [
+    "cli", "coding", "agent", "ai", "assistant", "code", "development", "programming",
+    "python", "javascript", "go", "rust", "universal", "natural-language"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: General",
+    "Topic :: Utilities",
+]
 dependencies = [
     "beautifulsoup4>=4.13.5",
-    "google-genai==1.12.1",
-    "python-dotenv==1.1.0",
-    "requests==2.32.3",
+    "google-genai>=1.9.0,<2.0.0",
+    "python-dotenv>=1.1.0",
+    "requests>=2.32.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/codegen-cli"
+Documentation = "https://github.com/your-username/codegen-cli#readme"
+Repository = "https://github.com/your-username/codegen-cli.git"
+Issues = "https://github.com/your-username/codegen-cli/issues"
+Changelog = "https://github.com/your-username/codegen-cli/blob/main/CHANGELOG.md"
+
+[project.scripts]
+codegen = "codegen_cli.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["codegen_cli"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "codegen_cli/",
+    "docs/",
+    "LICENSE",
+    "pyproject.toml",
 ]
