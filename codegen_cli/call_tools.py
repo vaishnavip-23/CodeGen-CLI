@@ -11,10 +11,10 @@ from typing import Any, Dict
 def _load_tool_module(name: str):
     """Load a tool module by name."""
     try:
-        module = importlib.import_module(f"tools.{name}")
+        module = importlib.import_module(f"codegen_cli.tools.{name}")
     except ModuleNotFoundError:
         try:
-            module = importlib.import_module(f"tools.{name.lower()}")
+            module = importlib.import_module(f"codegen_cli.tools.{name.lower()}")
         except Exception as e:
             raise RuntimeError(f"Tool '{name}' not found.") from e
     return module
