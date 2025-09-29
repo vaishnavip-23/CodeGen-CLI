@@ -6,12 +6,12 @@ A lightweight Task tool for CodeGen2.
 Usage:
   call(description, prompt, subagent_type)
 
-This implementation performs a simple static summary:
-- counts files by extension
-- lists top-level files and folders
-- returns the first 2000 characters of README.md and behavior.md if present
-
-This is simple and safe (read-only) and intended to satisfy "generate summary for the codebase".
+This implementation builds a dynamic, repository-wide summary:
+- Recursively scans project files (ignoring common noise)
+- Counts files by extension and totals
+- Lists top-level files and folders
+- Reads excerpts from README-like files and behavior docs if present
+- Produces a professional, structured summary limited to 1000 words
 """
 
 from pathlib import Path
@@ -27,7 +27,7 @@ def _gather_files(root: Path) -> List[Path]:
     for p in root.rglob('*'):
         if p.is_file():
             # ignore common noise
-            if any(part in ('.git', '__pycache__', 'node_modules', '.venv') for part in p.parts):
+            if any(part in ('.git', '__pycache__', 'node_modules', '.venv', '.env', '.mypy_cache', '.pytest_cache', '.idea', '.vscode', 'dist', 'build') for part in p.parts):
                 continue
             files.append(p)
     return files
@@ -76,6 +76,76 @@ def _truncate_to_word_limit(text: str, max_words: int = 1000) -> str:
     
     return result
 
+def _summarize_code_text(code_text: str, max_words: int = 500) -> str:
+    """Heuristic summary of an inline code block without calling LLM.
+
+    Detects language hints, counts lines, functions, classes, imports, and produces
+    a concise explanation outline.
+    """
+    import re
+    text = code_text.strip()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    total_lines = len(lines)
+    sample = "\n".join(lines[:50])
+
+    # Naive language detection
+    language = "unknown"
+    if re.search(r"^\s*def\s+\w+\(", text, re.M):
+        language = "python"
+    elif re.search(r"^\s*(function|const|let|var)\s+\w+|=>\s*\{", text, re.M):
+        language = "javascript"
+    elif re.search(r"#include\s+<|int\s+main\s*\(", text):
+        language = "c/c++"
+    elif re.search(r"class\s+\w+\s*:\s*$", text, re.M):
+        language = "python"
+
+    # Feature counts
+    functions = len(re.findall(r"(^\s*def\s+\w+\(|^\s*(function\s+\w+\(|\w+\s*=\s*\([^)]*\)\s*=>))", text, re.M))
+    classes = len(re.findall(r"^\s*class\s+\w+", text, re.M))
+    imports = len(re.findall(r"^\s*(import\s+|from\s+\w+\s+import|#include\s+)", text, re.M))
+
+    # Pull top-level docstring/comment if present
+    doc = ""
+    m = re.search(r"^\s*([\"\']{3}[\s\S]*?[\"\']{3})", text)
+    if m:
+        doc = m.group(1)
+    else:
+        m2 = re.search(r"^\s*//\s*(.+)$", text, re.M)
+        if m2:
+            doc = m2.group(1)
+
+    summary = []
+    summary.append("# Code Block Summary")
+    summary.append("")
+    summary.append(f"Language: {language}")
+    summary.append(f"Lines: {total_lines}")
+    summary.append(f"Functions: {functions} | Classes: {classes} | Imports: {imports}")
+    if doc:
+        summary.append("")
+        summary.append("Docstring/Comment excerpt:")
+        summary.append(doc[:300] + ("..." if len(doc) > 300 else ""))
+
+    # Outline based on simple cues
+    if language == "python":
+        if re.search(r"if __name__ == ['\"]__main__['\"]:", text):
+            summary.append("\nContains a script entry point guarded by __main__.")
+        if classes:
+            summary.append("Defines one or more classes; likely object-oriented components.")
+        if functions:
+            summary.append("Defines helper or API functions to encapsulate logic.")
+    elif language == "javascript":
+        if re.search(r"module\.exports|export\s+(default|const|function)", text):
+            summary.append("\nModule with exported APIs (CommonJS/ESM).")
+        if re.search(r"async\s+function|=>\s*\{", text):
+            summary.append("Uses asynchronous functions or arrow functions.")
+
+    # Include a small snippet
+    snippet = sample[:600] + ("..." if len(sample) > 600 else "")
+    summary.append("\nRepresentative snippet:\n" + snippet)
+
+    text_out = "\n".join(summary)
+    return _truncate_to_word_limit(text_out, max_words)
+
 def call(description: str = "", prompt: str = "", subagent_type: str = "general-purpose") -> Dict[str, Any]:
     """
     Entrypoint for the Task tool.
@@ -84,6 +154,12 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
       {"tool":"Task", "success": True/False, "output": { ... structured summary ... }}
     """
     try:
+        # If called to summarize an inline code block
+        if subagent_type in ("code-summary", "code_explain") or (description and "code" in description.lower() and prompt.strip()):
+            code_summary = _summarize_code_text(prompt)
+            out = {"summary": code_summary}
+            return {"tool": "Task", "success": True, "output": out, "args": [description, "<code-block>", subagent_type], "kwargs": {}}
+
         files = _gather_files(ROOT)
         by_ext = collections.Counter()
         for f in files:
@@ -96,57 +172,78 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
                 continue
             top_level.append(p.name)
 
-        readme = _read_excerpt(ROOT / "README.md", 1000)
-        behavior = _read_excerpt(ROOT / "behavior.md", 1000)
+        # Try multiple README-like files
+        readme_candidates = [
+            ROOT / "README.md",
+            ROOT / "Readme.md",
+            ROOT / "readme.md",
+            ROOT / "docs" / "README.md",
+        ]
+        readme = ""
+        for cand in readme_candidates:
+            if cand.exists():
+                readme = _read_excerpt(cand, 1000)
+                break
+
+        behavior_candidates = [
+            ROOT / "behavior.md",
+            ROOT / "docs" / "behavior.md",
+            ROOT / "codegen_cli" / "config" / "behavior.md",
+        ]
+        behavior = ""
+        for cand in behavior_candidates:
+            if cand.exists():
+                behavior = _read_excerpt(cand, 1000)
+                break
+
+        # Precompute display strings to avoid backslashes in f-string expressions
+        top_level_display = ", ".join(top_level[:20]) + (" ..." if len(top_level) > 20 else "")
+        by_ext_display = dict(by_ext.most_common(10))
+        if len(by_ext) > 10:
+            by_ext_display_trailer = " ..."
+        else:
+            by_ext_display_trailer = ""
+        readme_section = f"README excerpt:\n{readme}\n\n" if readme else ""
+        behavior_section = f"Behavior doc excerpt:\n{behavior}\n\n" if behavior else ""
 
         # Create a comprehensive, structured summary (under 1000 words)
-        summary_text = f"""# CodeGen2 - CLI Coding Agent
+        summary_text = f"""
+# Repository Summary
 
-## Project Overview
+## Overview
+This repository contains a repository-aware CLI coding agent. It accepts natural-language requests and executes safe, tool-driven actions against the local project. It emphasizes discover-first planning, clear confirmation for destructive steps, and readable, boxed terminal output.
 
-This project is a command-line coding assistant that understands natural language. It's designed to be a "repository-aware" agent, meaning it can interact with the files in your project to perform various tasks.
+## Capabilities
+- Natural language commands (e.g., "summarize the repo", "find TODOs", "edit file")
+- LLM-backed plan generation with strict JSON schema
+- Rich tool suite: Read, Write, Edit, MultiEdit, Grep, Glob, LS, Bash (safe), WebFetch, WebSearch, Delete, TodoWrite, Task
+- User-friendly REPL with small-talk and dynamic help
+- API key management and rate-limit error messages
 
-**Core Functionality:**
-- **Natural Language Interface**: You can give it commands in plain English (e.g., "summarize the codebase," "read the README file")
-- **LLM Integration**: It uses the Google Gemini API to understand your requests and create a plan of action
-- **Tool-Based Architecture**: The agent has a set of "tools" it can use to interact with your project. These tools are modular Python scripts located in the tools/ directory
-- **Safety First**: The agent is designed with safety in mind. It has built-in protections to prevent accidental damage to your files, and it will ask for your confirmation before making any destructive changes
+## Structure
+- Top-level entries: {top_level_display}
+- File counts by extension: {by_ext_display}{by_ext_display_trailer}
+- Total files scanned (excluding noise): {len(files)}
 
 ## Key Components
-
-- **`main.py`**: This is the main entry point of the application. It handles the user input, communicates with the Gemini API, and orchestrates the execution of the tools
-- **`tools/` directory**: This directory contains the individual tools that the agent can use, such as read, write, edit, glob, grep, and bash
-- **`system_prompt.txt`**: This file contains the instructions and rules that are provided to the Gemini API to guide its behavior
-- **`output.py`**: This module is responsible for the user interface, including the colored and boxed output that you see in your terminal
-
-## Project Statistics
-
-- **Total Files**: {len(files)} files
-- **Python Files**: {by_ext['.py']} files
-- **Tool Count**: 13 specialized tools
-- **Main Application**: 613 lines of code
+- codegen_cli/main.py: configuration, plan generation, history handling
+- codegen_cli/repl.py: interactive loop, NL routing to Task/tool plans
+- codegen_cli/output.py: rendering boxed output and tool results
+- codegen_cli/tools/: modular tools used by the agent
+- codegen_cli/config/: behavior and system prompt specifications
 
 ## Workflow
+1. Discover with LS/Glob
+2. Inspect with Read/Grep
+3. Propose a plan (LLM), validate, ask consent for destructive steps
+4. Execute tools and display results
 
-The agent follows a "discovery-first" approach:
-
-1. **Discover**: It uses tools like `ls` and `glob` to find files
-2. **Inspect**: It uses tools like `read` and `grep` to examine the content of files
-3. **Modify**: It uses tools like `edit` and `write` to make changes to files
-
-This workflow ensures that the agent's actions are deliberate and predictable.
-
-## Architecture
-
-The system is built with a modular architecture where each tool is a separate Python module that can be called independently. The main application coordinates between the user, the LLM, and the tools to provide a seamless experience.
-
-## Safety Features
-
-- **Path Protection**: Prevents access outside workspace
-- **Confirmation Required**: Asks permission for destructive changes
-- **Command Security**: Blocks dangerous shell commands
-
-In short, you have a powerful and well-designed coding agent that you can interact with using natural language. The agent is designed to be safe, predictable, and helpful for a wide range of coding tasks."""
+## Documentation Excerpts
+{readme_section}{behavior_section}
+## Notes
+- History and todos are stored in user config (~/.config/codegen), never in the project
+- Project-local .codegen override is disabled by default
+"""
 
         # Apply word limit to summary
         summary_text = _truncate_to_word_limit(summary_text, 1000)
