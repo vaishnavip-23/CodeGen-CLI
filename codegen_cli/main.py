@@ -12,6 +12,7 @@ import traceback
 from datetime import datetime
 from typing import Tuple, Any, Dict, List
 from pathlib import Path
+import sys
 
 # Load environment variables
 def _try_parse_env_file(path: Path) -> Dict[str, str]:
@@ -98,6 +99,76 @@ def _ensure_client():
         except Exception:
             CLIENT = None
     return CLIENT
+
+# ---------------------------
+# Version & Update Check
+# ---------------------------
+def _get_installed_version() -> str:
+    try:
+        import importlib.metadata as _m
+        return _m.version("codegen-cli")
+    except Exception:
+        return "unknown"
+
+def _get_pypi_latest_version(package_name: str = "codegen-cli") -> str:
+    """Fetch latest version string from PyPI JSON API."""
+    try:
+        import requests  # type: ignore
+        url = f"https://pypi.org/pypi/{package_name}/json"
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        return str(data.get("info", {}).get("version", "unknown"))
+    except Exception:
+        return "unknown"
+
+def _compare_versions(v1: str, v2: str) -> int:
+    """Return -1 if v1<v2, 0 if equal, 1 if v1>v2 using loose semantic compare."""
+    def _split(v: str):
+        import re
+        return [int(x) if x.isdigit() else x for x in re.split(r"[\.-]", v)]
+    try:
+        a, b = _split(v1), _split(v2)
+        for i in range(max(len(a), len(b))):
+            ai = a[i] if i < len(a) else 0
+            bi = b[i] if i < len(b) else 0
+            if isinstance(ai, int) and isinstance(bi, int):
+                if ai < bi:
+                    return -1
+                if ai > bi:
+                    return 1
+            else:
+                ai_s, bi_s = str(ai), str(bi)
+                if ai_s < bi_s:
+                    return -1
+                if ai_s > bi_s:
+                    return 1
+        return 0
+    except Exception:
+        return 0
+
+def _check_update():
+    """Print update status comparing installed vs PyPI latest."""
+    installed = _get_installed_version()
+    latest = _get_pypi_latest_version("codegen-cli")
+    print("CodeGen-CLI version check")
+    print("-------------------------")
+    print(f"Installed: {installed}")
+    print(f"Latest on PyPI: {latest}")
+    if installed == "unknown" or latest == "unknown":
+        print("Could not determine versions. Ensure internet connectivity and that the package is installed.")
+        return
+    cmp = _compare_versions(installed, latest)
+    if cmp < 0:
+        print("A newer version is available.")
+        print("Upgrade with:")
+        print("  pip install -U codegen-cli")
+        print("Or if installed via pipx:")
+        print("  pipx upgrade codegen-cli")
+    elif cmp == 0:
+        print("You are up to date.")
+    else:
+        print("You are ahead of the latest PyPI release (pre-release or local build).")
 
 # File paths
 WORKSPACE_ROOT = os.getcwd()
@@ -723,6 +794,9 @@ def main():
             print(f"CodeGen-CLI v{ver}")
             print("Universal CLI coding agent that understands any codebase")
             return
+        elif arg in ("--check-update", "check-update", "update", "--update"):
+            _check_update()
+            return
         elif arg in ("--help", "-h", "help"):
             print("CodeGen-CLI - Universal Coding Agent")
             print("")
@@ -730,7 +804,10 @@ def main():
             print("  codegen                    # Start interactive CLI")
             print("  codegen --help            # Show this help")
             print("  codegen --version         # Show version")
+            print("  codegen --check-update    # Check if a newer version is available on PyPI")
             print("  codegen --set-key [KEY]   # Save GEMINI_API_KEY to user config")
+            print("")
+            print("PyPI: https://pypi.org/project/codegen-cli/")
             print("")
             print("Setup Required:")
             print("  • Run 'codegen --set-key' and paste your Gemini API key")
