@@ -1,5 +1,5 @@
 """
-Todo Management Tool for CodeGen2
+Todo Management Tool for CodeGen-CLI
 
 This tool manages a simple todo list stored in a JSON file.
 It supports adding, listing, removing, and clearing todos.

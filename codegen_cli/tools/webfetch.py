@@ -1,5 +1,5 @@
 """
-Web Fetch Tool for CodeGen2
+Web Fetch Tool for CodeGen-CLI
 
 This tool fetches content from web URLs and extracts text.
 It includes content length limits and error handling.
@@ -23,7 +23,7 @@ def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
     try:
         # Prepare request headers
         headers = {
-            "User-Agent": "CodeGen2-CLI-Agent/1.0"
+            "User-Agent": "CodeGen-CLI-Agent/1.0"
         }
         
         # Make request

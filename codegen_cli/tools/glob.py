@@ -1,5 +1,5 @@
 """
-File Pattern Matching Tool for CodeGen2
+File Pattern Matching Tool for CodeGen-CLI
 
 This tool finds files matching glob patterns within the workspace.
 It includes safety checks to prevent access outside the workspace.

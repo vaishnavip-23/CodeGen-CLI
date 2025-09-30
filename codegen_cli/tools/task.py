@@ -1,17 +1,17 @@
 """
 tools/task.py
 
-A lightweight Task tool for CodeGen2.
+A lightweight Task tool for CodeGen-CLI.
 
 Usage:
   call(description, prompt, subagent_type)
 
-This implementation builds a dynamic, repository-wide summary:
-- Recursively scans project files (ignoring common noise)
-- Counts files by extension and totals
+This implementation builds a concise, high-level repository summary:
+- Does NOT scan every file (avoids deep recursion)
 - Lists top-level files and folders
-- Reads excerpts from README-like files and behavior docs if present
-- Produces a professional, structured summary limited to 1000 words
+- Highlights key components with one-line descriptions
+- Reads short excerpts from README/behavior docs if present
+- Produces a professional, structured summary limited to 600 words
 """
 
 from pathlib import Path
@@ -22,15 +22,37 @@ import collections
 
 ROOT = Path.cwd()
 
-def _gather_files(root: Path) -> List[Path]:
-    files = []
-    for p in root.rglob('*'):
-        if p.is_file():
-            # ignore common noise
-            if any(part in ('.git', '__pycache__', 'node_modules', '.venv', '.env', '.mypy_cache', '.pytest_cache', '.idea', '.vscode', 'dist', 'build') for part in p.parts):
-                continue
-            files.append(p)
-    return files
+def _gather_top_level_entries(root: Path) -> List[Path]:
+    """Return only top-level entries (files/dirs) to keep summary high-level."""
+    try:
+        return [p for p in root.iterdir() if p.name not in ('.git', '.venv', '.env', 'node_modules', 'dist', 'build', '__pycache__')]
+    except Exception:
+        return []
+
+def _describe_entry(p: Path) -> str:
+    """Return a concise one-line description for a top-level entry."""
+    name = p.name
+    if p.is_dir():
+        dir_map = {
+            'codegen_cli': 'Python package for the CLI agent (core, tools, config)',
+            'docs': 'Project documentation and README',
+            'tests': 'Test suite for the CLI agent',
+            '.github': 'GitHub workflows and repository configuration',
+        }
+        return dir_map.get(name, 'Directory')
+    # files
+    file_map = {
+        'pyproject.toml': 'Project metadata, dependencies, entry points',
+        'setup.py': 'Legacy setup script for packaging',
+        'MANIFEST.in': 'Packaging include rules',
+        'LICENSE': 'Project license',
+        'quickstart.sh': 'Helper script to bootstrap usage',
+        'uv.lock': 'uv resolver lock file',
+        '.gitignore': 'Git ignore rules',
+        '.python-version': 'Python version pin for tooling',
+        'README.md': 'Repository overview',
+    }
+    return file_map.get(name, 'File')
 
 def _read_excerpt(path: Path, max_chars: int = 2000) -> str:
     try:
@@ -54,7 +76,7 @@ def _count_words(text: str) -> int:
     clean_text = re.sub(r'\s+', ' ', clean_text)
     return len(clean_text.split())
 
-def _truncate_to_word_limit(text: str, max_words: int = 1000) -> str:
+def _truncate_to_word_limit(text: str, max_words: int = 600) -> str:
     """Truncate text to stay under word limit while ensuring it feels complete."""
     if _count_words(text) <= max_words:
         return text
@@ -160,17 +182,18 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
             out = {"summary": code_summary}
             return {"tool": "Task", "success": True, "output": out, "args": [description, "<code-block>", subagent_type], "kwargs": {}}
 
-        files = _gather_files(ROOT)
+        # High-level only: do not scan entire repo. Inspect top-level entries.
+        top_level_paths = _gather_top_level_entries(ROOT)
+        top_level = [p.name for p in sorted(top_level_paths, key=lambda x: x.name.lower())]
+        # Approximate file type distribution from top-level files only
         by_ext = collections.Counter()
-        for f in files:
-            ext = f.suffix.lower() or "<noext>"
-            by_ext[ext] += 1
+        for p in top_level_paths:
+            if p.is_file():
+                ext = p.suffix.lower() or "<noext>"
+                by_ext[ext] += 1
 
-        top_level = []
-        for p in sorted(ROOT.iterdir(), key=lambda x: x.name.lower()):
-            if p.name in ('.git', '.venv'):  # skip noisy top-level entries
-                continue
-            top_level.append(p.name)
+        # Build one-line descriptions per top-level entry
+        described = [f"- {p.name}: {_describe_entry(p)}" for p in sorted(top_level_paths, key=lambda x: x.name.lower())]
 
         # Try multiple README-like files
         readme_candidates = [
@@ -206,7 +229,7 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
         readme_section = f"README excerpt:\n{readme}\n\n" if readme else ""
         behavior_section = f"Behavior doc excerpt:\n{behavior}\n\n" if behavior else ""
 
-        # Create a comprehensive, structured summary (under 1000 words)
+        # Create a concise, structured summary (<=600 words)
         summary_text = f"""
 # Repository Summary
 
@@ -223,7 +246,10 @@ This repository contains a repository-aware CLI coding agent. It accepts natural
 ## Structure
 - Top-level entries: {top_level_display}
 - File counts by extension: {by_ext_display}{by_ext_display_trailer}
-- Total files scanned (excluding noise): {len(files)}
+  (High-level view only; not scanning all files)
+
+## Top-level Items (one-line each)
+{os.linesep.join(described)}
 
 ## Key Components
 - codegen_cli/main.py: configuration, plan generation, history handling
@@ -245,16 +271,12 @@ This repository contains a repository-aware CLI coding agent. It accepts natural
 - Project-local .codegen override is disabled by default
 """
 
-        # Apply word limit to summary
-        summary_text = _truncate_to_word_limit(summary_text, 1000)
+        # Apply strict 600-word limit to summary
+        summary_text = _truncate_to_word_limit(summary_text, 600)
         
+        # Return only the composed summary to avoid duplicate sections in renderer
         out = {
-            "summary": summary_text,
-            "files_count": len(files),
-            "files_by_extension": dict(by_ext.most_common()),
-            "top_level": top_level,
-            "readme_excerpt": readme,
-            "behavior_excerpt": behavior
+            "summary": summary_text
         }
         return {"tool": "Task", "success": True, "output": out, "args": [description, prompt, subagent_type], "kwargs": {}}
     except Exception as e:

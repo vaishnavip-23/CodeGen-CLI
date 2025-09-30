@@ -1,5 +1,5 @@
 """
-Delete Tool for CodeGen2
+Delete Tool for CodeGen-CLI
 
 This tool safely deletes files and directories within the workspace.
 It includes safety checks to prevent accidental deletion outside the workspace.

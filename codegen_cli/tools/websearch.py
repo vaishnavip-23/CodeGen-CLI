@@ -1,5 +1,5 @@
 """
-Web Search Tool for CodeGen2
+Web Search Tool for CodeGen-CLI
 
 This tool searches the web using DuckDuckGo and returns search results.
 It includes error handling and result formatting.
@@ -26,7 +26,7 @@ def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     try:
         # Prepare request
         headers = {
-            "User-Agent": "CodeGen2-CLI-Agent/1.0"
+            "User-Agent": "CodeGen-CLI-Agent/1.0"
         }
         data = {"q": query}
         
