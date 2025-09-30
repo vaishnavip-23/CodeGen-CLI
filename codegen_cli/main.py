@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CodeGen2 - CLI Coding Agent
+CodeGen-CLI - Universal Coding Agent
 
 A command-line assistant that understands natural language and can interact with your codebase.
 Uses Google Gemini API for plan generation and executes actions through modular tools.
@@ -460,7 +460,7 @@ def handle_small_talk(user_text: str) -> bool:
         return True
 
     if "what can you do" in s or "what do you do" in s or "capabilities" in s:
-        reply = """# CodeGen2 - CLI Coding Agent Capabilities
+        reply = """# CodeGen-CLI - Universal Coding Agent Capabilities
 
 ## Core Functionality
 I am a repository-aware CLI coding assistant that can interact with your codebase through natural language commands.
@@ -720,11 +720,11 @@ def main():
                 ver = _m.version("codegen-cli")
             except Exception:
                 ver = "unknown"
-            print(f"CodeGen CLI v{ver}")
+            print(f"CodeGen-CLI v{ver}")
             print("Universal CLI coding agent that understands any codebase")
             return
         elif arg in ("--help", "-h", "help"):
-            print("CodeGen CLI - Universal Coding Agent")
+            print("CodeGen-CLI - Universal Coding Agent")
             print("")
             print("Usage:")
             print("  codegen                    # Start interactive CLI")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CodeGen CLI - Universal Coding Agent
+CodeGen-CLI - Universal Coding Agent
 
 A simple command-line interface for the CodeGen coding agent.
 This is the main entry point that users will call.
