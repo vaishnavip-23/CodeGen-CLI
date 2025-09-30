@@ -5,8 +5,6 @@ A simple command-line coding agent inspired by Claude Code and Cursor CLI, and p
 1. [CodeGen-CLI PyPI Package](https://pypi.org/project/codegen-cli/)
 
 
-
-
 ## What is CodeGen-CLI?
 CodeGen-CLI is a small, easy-to-use agent that helps you explore and work with codebases using plain English. Instead of remembering many commands, you can ask the tool to find, read, or change code for you.
 
@@ -32,7 +30,7 @@ codegen
 ```
 2. Local (from source) — users can clone the repo and run it locally:
 ```bash
-git clone https://github.com/your-username/codegen-cli.git
+git clone https://github.com/vaishnavip-23/CodeGen-CLI.git
 cd codegen-cli
 uv run -m codegen_cli.cli 
 ```
