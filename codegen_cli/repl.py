@@ -18,6 +18,11 @@ def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: boo
     print(f"Gemini API key: {'set' if has_key else 'missing'}")
     print("Type 'help' for help. Try natural language like 'summarize the repo'.")
     print("Non-destructive steps run immediately. Destructive steps require confirmation.")
+    print("NOTE: For best results, keep CodeGen-CLI up to date.")
+    print("  - Check latest: codegen --check-update")
+    print("  - Upgrade: pip install -U codegen-cli")
+    print("  - Pin specific: pip install codegen-cli==<version>")
+    print("  - PyPI: https://pypi.org/project/codegen-cli/")
     if not has_key:
         print("Tip: run 'codegen --set-key' or add GEMINI_API_KEY to your .env")
     print("=" * 50)
