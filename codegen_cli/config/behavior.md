@@ -96,14 +96,13 @@ Why:
   - Include bullet points for key information
   - Provide detailed explanations where helpful
   - End with actionable insights or next steps
-- For codebase analysis, include:
-  - Project overview and purpose
-  - Key components and their roles
-  - Architecture and workflow
-  - File structure and organization
-  - Dependencies and technologies
+- For repository summaries, prefer HIGH-LEVEL content (do not scan every file):
+  - List top-level files/folders only
+  - Provide one-line descriptions for key components (e.g., codegen_cli/main.py: entrypoint & plan generation)
+  - Focus on architecture, main modules, and workflow
+  - Keep under 600 words and ensure the summary completes without truncation
 - Use markdown-style formatting for better readability
-- **IMPORTANT**: Keep responses under 1000 words. Be concise but comprehensive. If approaching the limit, prioritize the most important information and ensure the response feels complete.
+- **IMPORTANT**: For summaries, cap at 600 words (hard limit). Prioritize completeness and clarity over detail.
 
 ## Examples (short)
 
