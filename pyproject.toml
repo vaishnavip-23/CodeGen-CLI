@@ -1,6 +1,6 @@
 [project]
 name = "codegen-cli"
-version = "0.1.5"
+version = "0.1.6"
 description = "Universal CLI coding agent that understands any codebase through natural language"
 readme = "docs/README.md"
 license = {text = "MIT"}
