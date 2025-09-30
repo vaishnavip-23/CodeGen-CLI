@@ -226,49 +226,29 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
             by_ext_display_trailer = " ..."
         else:
             by_ext_display_trailer = ""
-        readme_section = f"README excerpt:\n{readme}\n\n" if readme else ""
-        behavior_section = f"Behavior doc excerpt:\n{behavior}\n\n" if behavior else ""
+        # High-level summary should not include long documentation excerpts
+        readme_section = ""
+        behavior_section = ""
 
         # Create a concise, structured summary (<=600 words)
         summary_text = f"""
 # Repository Summary
 
 ## Overview
-This repository contains a repository-aware CLI coding agent. It accepts natural-language requests and executes safe, tool-driven actions against the local project. It emphasizes discover-first planning, clear confirmation for destructive steps, and readable, boxed terminal output.
+High-level: A repository-aware CLI coding agent that executes safe, tool-driven actions in response to natural-language instructions. Emphasizes discovery-first planning and confirmation for destructive steps.
 
-## Capabilities
-- Natural language commands (e.g., "summarize the repo", "find TODOs", "edit file")
-- LLM-backed plan generation with strict JSON schema
-- Rich tool suite: Read, Write, Edit, MultiEdit, Grep, Glob, LS, Bash (safe), WebFetch, WebSearch, Delete, TodoWrite, Task
-- User-friendly REPL with small-talk and dynamic help
-- API key management and rate-limit error messages
-
-## Structure
-- Top-level entries: {top_level_display}
-- File counts by extension: {by_ext_display}{by_ext_display_trailer}
-  (High-level view only; not scanning all files)
-
-## Top-level Items (one-line each)
+## Top-level Items (one line each)
 {os.linesep.join(described)}
 
-## Key Components
-- codegen_cli/main.py: configuration, plan generation, history handling
-- codegen_cli/repl.py: interactive loop, NL routing to Task/tool plans
-- codegen_cli/output.py: rendering boxed output and tool results
-- codegen_cli/tools/: modular tools used by the agent
-- codegen_cli/config/: behavior and system prompt specifications
+## Key Components (high-level)
+- codegen_cli/main.py: entrypoint logic, plan generation, history
+- codegen_cli/repl.py: interactive loop, routes NL to tools/tasks
+- codegen_cli/output.py: UI/printing helpers
+- codegen_cli/tools/: modular tools (read, edit, grep, ls, glob, etc.)
+- codegen_cli/config/: system prompt and behavior guidance
 
-## Workflow
-1. Discover with LS/Glob
-2. Inspect with Read/Grep
-3. Propose a plan (LLM), validate, ask consent for destructive steps
-4. Execute tools and display results
-
-## Documentation Excerpts
-{readme_section}{behavior_section}
-## Notes
-- History and todos are stored in user config (~/.config/codegen), never in the project
-- Project-local .codegen override is disabled by default
+## Workflow (brief)
+1) Discover with LS/Glob → 2) Inspect with Read/Grep → 3) Plan (LLM) with confirmation → 4) Execute tools
 """
 
         # Apply strict 600-word limit to summary
