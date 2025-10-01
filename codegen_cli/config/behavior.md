@@ -39,6 +39,29 @@ Why:
 - Use `Edit`/`MultiEdit` for precise changes—always prepare edits with Read.
 - Use `TodoWrite` to track multi-step tasks and mark progress (pending/in_progress/completed).
 
+## Multi-tool integration patterns
+
+- **Complex workflows**: Start with TodoWrite to create task breakdown, then execute tools sequentially.
+- **Todo auto-progress**: Include tool names in todo content (e.g., "Search files with Glob") for automatic status updates.
+- **MultiEdit best practices**: Use for atomic file changes with multiple replacements; provide complete edit list upfront.
+- **Error recovery**: If a tool fails mid-workflow, update relevant todos and suggest recovery steps.
+
+## Todo integration workflow
+
+1. **Planning phase**: Use TodoWrite to break down complex requests into actionable steps.
+2. **Execution phase**: Tool execution automatically updates todo status based on content matching.
+3. **Manual updates**: Use TodoWrite("update_status", id, status) for explicit status changes.
+4. **Progress tracking**: Use TodoWrite("active") to check pending/in-progress items.
+
+Example multi-step workflow:
+```
+User: "Refactor the authentication system"
+1. TodoWrite([{content:"Search auth files with Glob", status:"pending", id:"1"}, ...])
+2. Glob("**/auth*.py") -> auto-updates todo 1 to in_progress, then completed
+3. Read each found file -> auto-updates relevant todos
+4. MultiEdit changes -> auto-updates edit todos
+```
+
 ## How to build plans
 
 - Keep steps small and explicit.

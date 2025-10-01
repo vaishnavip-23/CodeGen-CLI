@@ -191,6 +191,49 @@ def _normalize_args(tool_name: str, args, kwargs):
 
     return args
 
+def auto_update_todo_progress(steps: list, current_step_index: int, success: bool):
+    """
+    Automatically update todo progress during multi-step operations.
+    
+    Args:
+        steps: List of tool steps being executed
+        current_step_index: Index of current step being executed 
+        success: Whether the current step succeeded
+    """
+    try:
+        # Import todowrite functions here to avoid circular imports
+        from .tools.todowrite import read_todos, write_todos
+        
+        todos = read_todos()
+        if not todos:
+            return
+            
+        # Find any todos that mention the current tool or are in_progress
+        current_tool = steps[current_step_index].get("tool", "").lower()
+        
+        for todo in todos:
+            content = todo.get("content", "").lower()
+            status = todo.get("status", "")
+            
+            # If this is the first step and todo mentions the tool, mark as in_progress
+            if (current_step_index == 0 and 
+                status == "pending" and 
+                current_tool in content):
+                todo["status"] = "in_progress"
+                
+            # If this is the last step and it succeeded, mark relevant todos as completed
+            elif (current_step_index == len(steps) - 1 and 
+                  success and 
+                  status == "in_progress" and
+                  current_tool in content):
+                todo["status"] = "completed"
+        
+        write_todos(todos)
+        
+    except Exception:
+        # Silently fail todo updates to not interfere with main workflow
+        pass
+
 def dispatch_tool(plan: Dict[str, Any]) -> Any:
     """
     Execute a tool plan and return results.

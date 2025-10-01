@@ -122,17 +122,19 @@ Examples:
 
 8) TodoWrite(todos_array)
 Description:
-  Write or update a to-do list for the current session. Used for planning multi-step work and tracking progress.
+  Write or update a to-do list for the current session. Used for planning multi-step work and tracking progress. Todos automatically integrate with tool execution for real-time progress tracking.
 Behavior:
   - Use TodoWrite frequently for complex tasks (>=3 steps).
   - Update status (pending, in_progress, completed) as you work.
+  - Status updates happen automatically during multi-tool operations.
+  - Include descriptive content that matches tool names for auto-progress tracking.
 Examples:
-  1) user: implement feature X
-     assistant plan: {"steps":[{"tool":"TodoWrite","args":[[{"content":"Design feature X","status":"pending","id":"1"}]]}],"explain":"Add todo to design feature X"}
-  2) user: start running tests as first task
-     assistant plan: {"steps":[{"tool":"TodoWrite","args":[[{"content":"Run test suite","status":"in_progress","id":"2"}]]}],"explain":"Mark test run in progress"}
-  3) user: mark task done
-     assistant plan: {"steps":[{"tool":"TodoWrite","args":[[{"content":"Design feature X","status":"completed","id":"1"}]]}],"explain":"Mark design complete"}
+  1) user: implement feature X with multiple files
+     assistant plan: {"steps":[{"tool":"TodoWrite","args":[[{"content":"Search for relevant files with Glob","status":"pending","id":"1"},{"content":"Read existing code with Read tool","status":"pending","id":"2"},{"content":"Edit configuration files","status":"pending","id":"3"}]]}],"explain":"Create multi-step todo list for feature implementation"}
+  2) user: update todo status manually
+     assistant plan: {"steps":[{"tool":"TodoWrite","args":["update_status","1","completed"]}],"explain":"Mark specific todo as completed"}
+  3) user: check active todos
+     assistant plan: {"steps":[{"tool":"TodoWrite","args":["active"]}],"explain":"List pending and in-progress todos"}
 
 9) WebFetch(url, prompt)
 Description:

@@ -204,12 +204,72 @@ def _merge_by_id(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]])
         return list(by_id.values())
 
 
+def update_todo_status(todo_id: str, new_status: str) -> Dict[str, Any]:
+    """
+    Update the status of a specific todo item.
+    
+    Args:
+        todo_id: ID of the todo to update
+        new_status: New status (pending, in_progress, completed)
+        
+    Returns:
+        Result dictionary
+    """
+    valid_statuses = {"pending", "in_progress", "completed"}
+    if new_status not in valid_statuses:
+        return {
+            "tool": "todowrite",
+            "success": False,
+            "output": f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        }
+    
+    todos = read_todos()
+    updated = False
+    
+    for todo in todos:
+        if todo.get("id") == todo_id:
+            todo["status"] = new_status
+            updated = True
+            break
+    
+    if not updated:
+        return {
+            "tool": "todowrite",
+            "success": False,
+            "output": f"Todo with ID '{todo_id}' not found"
+        }
+    
+    write_todos(todos)
+    return {
+        "tool": "todowrite",
+        "success": True,
+        "output": f"Updated todo {todo_id} status to {new_status}"
+    }
+
+def get_active_todos() -> Dict[str, Any]:
+    """
+    Get todos that are pending or in_progress.
+    
+    Returns:
+        Result dictionary with active todos
+    """
+    todos = read_todos()
+    active = [t for t in todos if t.get("status") in {"pending", "in_progress"}]
+    return {
+        "tool": "todowrite",
+        "success": True,
+        "output": {
+            "active_todos": active,
+            "count": len(active)
+        }
+    }
+
 def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     """
     Main function for todo operations.
     
     Args:
-        action: Action to perform (add, list, pop, clear)
+        action: Action to perform (add, list, pop, clear, update_status, active)
         *args: Additional arguments (e.g., todo text for 'add')
         
     Returns:
@@ -251,7 +311,7 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
                 return _write_full_list(updated)
             return _write_full_list(todos_arg)
 
-    # Fallback to legacy subcommand interface (add, list, pop, clear)
+    # Fallback to legacy subcommand interface
     action = action or "list"
     
     if action == "add":
@@ -267,9 +327,21 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     elif action == "clear":
         return clear_todos()
     
+    elif action == "update_status":
+        if len(args) < 2:
+            return {
+                "tool": "todowrite",
+                "success": False,
+                "output": "update_status requires todo_id and new_status arguments"
+            }
+        return update_todo_status(args[0], args[1])
+    
+    elif action == "active":
+        return get_active_todos()
+    
     else:
         return {
             "tool": "todowrite",
             "success": False,
-            "output": f"Unknown action: {action}. Available actions: add, list, pop, clear"
+            "output": f"Unknown action: {action}. Available actions: add, list, pop, clear, update_status, active"
         }
