@@ -67,17 +67,16 @@ def _glob_retry_read(module, args, kwargs):
     
     # Try glob to find the file
     try:
-        glob_module = importlib.import_module("tools.glob")
+        glob_module = importlib.import_module("codegen_cli.tools.glob")
         glob_result = glob_module.call(f"**/{target_path}")
-        
+
         if isinstance(glob_result, dict) and glob_result.get("success"):
-            output = glob_result.get("output", {})
-            if isinstance(output, dict) and "files" in output:
-                files = output["files"]
-                if files and len(files) > 0:
-                    # Retry read with found file
-                    new_args = [files[0]] + list(args[1:])
-                    return _call_module_func_safe(module, new_args, kwargs)
+            output = glob_result.get("output")
+            # Our Glob tool returns a list of relative paths in 'output'
+            if isinstance(output, list) and output:
+                # Retry read with first match
+                new_args = [output[0]] + list(args[1:])
+                return _call_module_func_safe(module, new_args, kwargs)
     except Exception:
         pass
     
@@ -172,13 +171,8 @@ def _normalize_args(tool_name: str, args, kwargs):
             return [path] + ([content] if content else [])
         return args
 
-    if name == "edit" and cleaned:
-        # Expect: path, old, new (best-effort: extract path first)
-        candidates = [c for c in cleaned if c.lower() not in stopwords]
-        path = pick_path(candidates)
-        if path:
-            rest = [c for c in candidates if c != path]
-            return [path] + rest
+    if name == "edit":
+        # Preserve original args to avoid losing empty strings ("" used to signal overwrite)
         return args
 
     if name == "grep" and cleaned:

@@ -46,6 +46,16 @@ def call(path: str, *args, **kwargs) -> dict:
         with open(full_path, "r", encoding="utf-8", errors="replace") as file:
             original_content = file.read()
         
+        # Special case: if old_string is empty string, treat as overwrite with new_string
+        if isinstance(old_string, str) and old_string == "":
+            with open(full_path, "w", encoding="utf-8") as file:
+                file.write(new_string)
+            rel_path = os.path.relpath(full_path, WORKSPACE)
+            return {
+                "success": True,
+                "output": f"Edited {rel_path}"
+            }
+
         if old_string not in original_content:
             if smart and isinstance(old_string, str):
                 # Build a forgiving regex that ignores case and allows punctuation/space between words

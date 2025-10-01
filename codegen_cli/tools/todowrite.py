@@ -159,7 +159,52 @@ def clear_todos() -> Dict[str, Any]:
         "output": "Cleared all todos and cleaned up database."
     }
 
-def call(action: str = "list", *args) -> Dict[str, Any]:
+def _is_todo_item(obj: Any) -> bool:
+    """
+    Validate a single todo item shape.
+
+    Expected keys: id, content, status
+    """
+    if not isinstance(obj, dict):
+        return False
+    return all(k in obj for k in ("id", "content", "status"))
+
+
+def _write_full_list(new_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Replace the entire todo list with the provided list.
+    """
+    if not isinstance(new_list, list) or not all(_is_todo_item(it) for it in new_list):
+        return {
+            "tool": "todowrite",
+            "success": False,
+            "output": "Invalid todos array. Each item must have id, content, status."
+        }
+    write_todos(new_list)
+    return {
+        "tool": "todowrite",
+        "success": True,
+        "output": {"message": "Todos updated", "count": len(new_list)}
+    }
+
+
+def _merge_by_id(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge incoming todos into existing by id. Replace items with matching ids; add new otherwise.
+    """
+    by_id = {t.get("id"): t for t in existing if isinstance(t, dict) and t.get("id") is not None}
+    for it in incoming:
+        if not _is_todo_item(it):
+            continue
+        by_id[it["id"]] = it
+    # Preserve stable order by sorting by id (string-safe)
+    try:
+        return sorted(by_id.values(), key=lambda x: str(x.get("id")))
+    except Exception:
+        return list(by_id.values())
+
+
+def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     """
     Main function for todo operations.
     
@@ -170,6 +215,43 @@ def call(action: str = "list", *args) -> Dict[str, Any]:
     Returns:
         Result dictionary
     """
+    # Support system-prompt style: TodoWrite(todos_array) or TodoWrite({merge:bool, todos:[...]})
+    # Case 1: action itself was passed as the todos array (dispatcher passes positional only)
+    if isinstance(action, list):
+        todos_arg = action
+        merge = False
+        if isinstance(kwargs, dict):
+            merge = bool(kwargs.get("merge", False))
+        if merge:
+            existing = read_todos()
+            updated = _merge_by_id(existing, todos_arg)
+            return _write_full_list(updated)
+        return _write_full_list(todos_arg)
+
+    # If the first positional arg is a list, treat it as the full todos list to write (direct calls)
+    if args and isinstance(args[0], list):
+        todos_arg = args[0]
+        merge = False
+        if isinstance(kwargs, dict):
+            merge = bool(kwargs.get("merge", False))
+        if merge:
+            existing = read_todos()
+            updated = _merge_by_id(existing, todos_arg)
+            return _write_full_list(updated)
+        return _write_full_list(todos_arg)
+
+    # If the first positional arg is a dict with {todos:[...], merge?:bool}
+    if args and isinstance(args[0], dict):
+        obj = args[0]
+        todos_arg = obj.get("todos")
+        if isinstance(todos_arg, list):
+            if obj.get("merge"):
+                existing = read_todos()
+                updated = _merge_by_id(existing, todos_arg)
+                return _write_full_list(updated)
+            return _write_full_list(todos_arg)
+
+    # Fallback to legacy subcommand interface (add, list, pop, clear)
     action = action or "list"
     
     if action == "add":
