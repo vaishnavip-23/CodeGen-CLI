@@ -731,7 +731,141 @@ def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[st
     plan["steps"] = new_steps
     return plan
 
+
+def inject_pre_delete_glob(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure delete steps are preceded by a glob check for existence."""
+    if not isinstance(plan, dict):
+        return plan
+
+    steps = plan.get("steps")
+    if not isinstance(steps, list):
+        return plan
+
+    cwd = Path.cwd()
+    new_steps = []
+    for step in steps:
+        if isinstance(step, dict) and step.get("tool", "").lower() == "delete":
+            args = step.get("args", []) or []
+            target = args[0] if args else None
+            if isinstance(target, str):
+                # Attempt to resolve filename-only targets to an actual relative path
+                resolved_target = target
+                simple_name = target.strip().strip("./")
+                if simple_name and os.path.sep not in simple_name and not simple_name.startswith("..") and not any(ch in simple_name for ch in "*?["):
+                    matches = [str(path.relative_to(cwd)) for path in cwd.rglob(simple_name) if path.is_file() and path.name == simple_name]
+                    if matches:
+                        resolved_target = matches[0]
+                        step["args"] = [resolved_target] + list(args[1:])
+                        target = resolved_target
+
+                needs_insert = True
+                if new_steps:
+                    prev = new_steps[-1]
+                    if isinstance(prev, dict) and prev.get("tool", "").lower() == "glob":
+                        prev_args = prev.get("args", []) or []
+                        prev_target = prev_args[0] if prev_args else None
+                        if prev_target == target:
+                            needs_insert = False
+                if needs_insert:
+                    pattern = target
+                    if isinstance(target, str) and not any(ch in target for ch in "*?["):
+                        pattern = f"**/{target.strip().lstrip('./')}"
+                    new_steps.append({
+                        "tool": "glob",
+                        "args": [pattern],
+                        "kwargs": {"_delete_precheck": True}
+                    })
+        new_steps.append(step)
+
+    plan["steps"] = new_steps
+    return plan
+
 # ---------------------------
+def resolve_edit_entire_old_content(plan: Dict[str, Any], user_text: str) -> Dict[str, Any]:
+    """Replace placeholder edit args and support comment-out requests."""
+    if not isinstance(plan, dict):
+        return plan
+
+    steps = plan.get("steps")
+    if not isinstance(steps, list):
+        return plan
+
+    placeholders = {
+        "<entire-old-content>",
+        "<entire_old_content>",
+        "__entire_old_content__",
+        "<{entire-old-content}>",
+    }
+    placeholders_lower = {p.lower() for p in placeholders}
+    user_lower = (user_text or "").lower()
+    request_comment = any(phrase in user_lower for phrase in ("comment out", "comment the", "comment everything"))
+
+    def _comment_out(text: str) -> str:
+        if not text:
+            return text
+        lines = text.splitlines(True)
+        commented = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                commented.append(line)
+                continue
+            if stripped.startswith("#"):
+                commented.append(line)
+                continue
+            indent_len = len(line) - len(line.lstrip(" \t"))
+            prefix = line[:indent_len]
+            rest = line[indent_len:]
+            commented.append(f"{prefix}# {rest}")
+        # Preserve trailing newline behaviour
+        result = "".join(commented)
+        if not result.endswith("\n") and text.endswith("\n"):
+            result += "\n"
+        return result
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if step.get("tool", "").lower() != "edit":
+            continue
+        args = step.get("args", [])
+        if not isinstance(args, list) or len(args) == 0:
+            continue
+        path = args[0]
+        old_value = args[1] if len(args) >= 2 else ""
+        if not isinstance(path, str) or not isinstance(old_value, str):
+            continue
+        if old_value.strip().lower() not in placeholders_lower:
+            continue
+
+        file_path = Path(path)
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / file_path
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            content = ""
+        new_value = args[2] if len(args) >= 3 and isinstance(args[2], str) else None
+        if request_comment:
+            new_content = _comment_out(content)
+        else:
+            new_content = new_value if new_value is not None else content
+
+        args[1] = content
+        if len(args) >= 3:
+            args[2] = new_content
+        else:
+            args.append(new_content)
+        step["args"] = args
+        kwargs = step.get("kwargs")
+        if not isinstance(kwargs, dict):
+            kwargs = {}
+        kwargs.setdefault("replace_all", True)
+        step["kwargs"] = kwargs
+
+    return plan
+
+
 # Plan Post-Processing Filters
 # ---------------------------
 def filter_invalid_read_steps(plan: Dict[str, Any]) -> Dict[str, Any]:

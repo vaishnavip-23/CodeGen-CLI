@@ -6,7 +6,7 @@ Handles calling individual tool modules and provides safety checks for file oper
 
 import importlib
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 import os
 
 def _load_tool_module(name: str):
@@ -47,6 +47,188 @@ def _call_module_func_safe(module, args, kwargs):
     if last_exc:
         raise last_exc
     return None
+
+
+def _execute_tool_call(tool_name: str, args, kwargs):
+    module = _load_tool_module(tool_name)
+    args = _normalize_args(tool_name, args, kwargs)
+
+    # Special handling for read tool
+    if tool_name.lower() == "read":
+        result = _call_module_func_safe(module, args, kwargs)
+        if result and isinstance(result, dict) and not result.get("success", True):
+            retry_result = _glob_retry_read(module, args, kwargs)
+            if retry_result:
+                result = retry_result
+        
+        if result is None:
+            result = {
+                "tool": tool_name,
+                "success": False,
+                "output": "Tool returned None",
+                "args": args,
+                "kwargs": kwargs,
+            }
+        elif isinstance(result, dict):
+            result.setdefault("tool", tool_name)
+            result.setdefault("args", args)
+            result.setdefault("kwargs", kwargs)
+        else:
+            result = {
+                "tool": tool_name,
+                "success": True,
+                "output": result,
+                "args": args,
+                "kwargs": kwargs,
+            }
+        return result
+
+    if tool_name.lower() == "write":
+        safe, error_msg = _check_write_safety(args, kwargs)
+        if not safe:
+            return {
+                "tool": tool_name,
+                "success": False,
+                "output": error_msg,
+                "args": args,
+                "kwargs": kwargs,
+            }
+
+    result = _call_module_func_safe(module, args, kwargs)
+    if result is None:
+        return {
+            "tool": tool_name,
+            "success": False,
+            "output": "Tool returned None",
+            "args": args,
+            "kwargs": kwargs,
+        }
+
+    if isinstance(result, dict):
+        result.setdefault("tool", tool_name)
+        result.setdefault("args", args)
+        result.setdefault("kwargs", kwargs)
+        return result
+
+    return {
+        "tool": tool_name,
+        "success": True,
+        "output": result,
+        "args": args,
+        "kwargs": kwargs,
+    }
+
+
+def _extract_args_kwargs_from_use(tool_name: str, use: Dict[str, Any]) -> Tuple[List[Any], Dict[str, Any]]:
+    args: List[Any] = []
+    kwargs: Dict[str, Any] = {}
+
+    if not isinstance(use, dict):
+        return args, kwargs
+
+    params = use.get("parameters")
+    if isinstance(params, dict):
+        if isinstance(params.get("args"), list):
+            args = list(params["args"])
+        if isinstance(params.get("kwargs"), dict):
+            kwargs = dict(params["kwargs"])
+        else:
+            for key, value in params.items():
+                if key in {"args", "kwargs"}:
+                    continue
+                kwargs[key] = value
+    elif isinstance(params, list):
+        args = list(params)
+
+    if "args" in use and isinstance(use["args"], list):
+        args = list(use["args"])
+    if "kwargs" in use and isinstance(use["kwargs"], dict):
+        kwargs = dict(use["kwargs"])
+
+    # Convert commonly used keyword names to positional arguments for our tools
+    lowered = tool_name.lower()
+    def _pop_first(keys):
+        for key in keys:
+            if key in kwargs:
+                value = kwargs.pop(key)
+                args.append(value)
+                return True
+        return False
+
+    if not args:
+        if lowered in {"read", "write", "edit", "delete", "ls"}:
+            if not _pop_first(["path", "file_path", "target", "directory"]):
+                _pop_first(["pattern"])
+        elif lowered == "glob":
+            _pop_first(["pattern", "glob"])
+        elif lowered == "grep":
+            _pop_first(["pattern"])
+
+    if lowered == "grep" and "path" not in kwargs:
+        if "path_pattern" in kwargs:
+            kwargs["path"] = kwargs.pop("path_pattern")
+
+    if lowered == "todowrite" and not args and "todos" in kwargs:
+        args.append(kwargs.pop("todos"))
+
+    return args, kwargs
+
+
+def _execute_parallel_tool(step: Dict[str, Any]):
+    tool_uses = step.get("tool_uses", [])
+    if not isinstance(tool_uses, list):
+        return {
+            "tool": step.get("tool", "multi_tool_use.parallel"),
+            "success": False,
+            "output": "tool_uses must be a list",
+            "args": [],
+            "kwargs": {},
+        }
+
+    aggregated_results = []
+    for use in tool_uses:
+        if not isinstance(use, dict):
+            aggregated_results.append({
+                "tool": "unknown",
+                "success": False,
+                "output": "Invalid tool specification",
+                "args": [],
+                "kwargs": {},
+            })
+            continue
+
+        raw_name = use.get("recipient_name") or use.get("tool")
+        if not raw_name:
+            aggregated_results.append({
+                "tool": "unknown",
+                "success": False,
+                "output": "Missing tool name",
+                "args": [],
+                "kwargs": {},
+            })
+            continue
+
+        tool_name = raw_name.split(".")[-1]
+        args, kwargs = _extract_args_kwargs_from_use(tool_name, use)
+        try:
+            result = _execute_tool_call(tool_name, args, kwargs)
+        except Exception as e:
+            result = {
+                "tool": tool_name,
+                "success": False,
+                "output": f"Tool execution failed: {e}\n{traceback.format_exc()}",
+                "args": args,
+                "kwargs": kwargs,
+            }
+        aggregated_results.append(result)
+
+    return {
+        "tool": step.get("tool", "multi_tool_use.parallel"),
+        "success": all(r.get("success", False) for r in aggregated_results),
+        "output": aggregated_results,
+        "args": [],
+        "kwargs": {},
+    }
 
 def _read_file_safe(path: str) -> str:
     """Safely read file content."""
@@ -206,13 +388,14 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
     
     # Support both {tool, args, kwargs} and {steps: [...]} formats
     if "tool" in plan and isinstance(plan.get("tool"), str):
-        steps = [
-            {
-                "tool": plan.get("tool"),
-                "args": plan.get("args", []),
-                "kwargs": plan.get("kwargs", {}),
-            }
-        ]
+        step = {
+            "tool": plan.get("tool"),
+            "args": plan.get("args", []),
+            "kwargs": plan.get("kwargs", {}),
+        }
+        if "tool_uses" in plan:
+            step["tool_uses"] = plan.get("tool_uses")
+        steps = [step]
     else:
         steps = plan.get("steps", [])
     if not isinstance(steps, list):
@@ -228,63 +411,14 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
             return {"tool": "unknown", "success": False, "output": "Step must be a dictionary", "args": [], "kwargs": {}}
         
         tool_name = step.get("tool", "unknown")
+        if tool_name.lower() == "multi_tool_use.parallel" or "tool_uses" in step:
+            return _execute_parallel_tool(step)
+
         args = step.get("args", [])
         kwargs = step.get("kwargs", {})
         
         try:
-            module = _load_tool_module(tool_name)
-            args = _normalize_args(tool_name, args, kwargs)
-            
-            # Special handling for read tool
-            if tool_name.lower() == "read":
-                result = _call_module_func_safe(module, args, kwargs)
-                if result and isinstance(result, dict) and not result.get("success", True):
-                    # Try glob retry
-                    retry_result = _glob_retry_read(module, args, kwargs)
-                    if retry_result:
-                        return retry_result
-            
-            # Special handling for write tool
-            elif tool_name.lower() == "write":
-                safe, error_msg = _check_write_safety(args, kwargs)
-                if not safe:
-                    return {
-                        "tool": tool_name,
-                        "success": False,
-                        "output": error_msg,
-                        "args": args,
-                        "kwargs": kwargs
-                    }
-            
-            result = _call_module_func_safe(module, args, kwargs)
-            if result is None:
-                return {
-                    "tool": tool_name,
-                    "success": False,
-                    "output": "Tool returned None",
-                    "args": args,
-                    "kwargs": kwargs
-                }
-            
-            # Ensure result has required fields
-            if isinstance(result, dict):
-                if "tool" not in result:
-                    result["tool"] = tool_name
-                if "args" not in result:
-                    result["args"] = args
-                if "kwargs" not in result:
-                    result["kwargs"] = kwargs
-            else:
-                result = {
-                    "tool": tool_name,
-                    "success": True,
-                    "output": result,
-                    "args": args,
-                    "kwargs": kwargs
-                }
-            
-            return result
-            
+            return _execute_tool_call(tool_name, args, kwargs)
         except Exception as e:
             return {
                 "tool": tool_name,
@@ -309,60 +443,16 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
                 continue
             
             tool_name = step.get("tool", "unknown")
+
+            if tool_name.lower() == "multi_tool_use.parallel" or "tool_uses" in step:
+                results.append(_execute_parallel_tool(step))
+                continue
+
             args = step.get("args", [])
             kwargs = step.get("kwargs", {})
             
             try:
-                module = _load_tool_module(tool_name)
-                args = _normalize_args(tool_name, args, kwargs)
-                
-                # Special handling for read tool
-                if tool_name.lower() == "read":
-                    result = _call_module_func_safe(module, args, kwargs)
-                    if result and isinstance(result, dict) and not result.get("success", True):
-                        retry_result = _glob_retry_read(module, args, kwargs)
-                        if retry_result:
-                            result = retry_result
-                
-                # Special handling for write tool
-                elif tool_name.lower() == "write":
-                    safe, error_msg = _check_write_safety(args, kwargs)
-                    if not safe:
-                        results.append({
-                            "tool": tool_name,
-                            "success": False,
-                            "output": error_msg,
-                            "args": args,
-                            "kwargs": kwargs
-                        })
-                        continue
-                
-                result = _call_module_func_safe(module, args, kwargs)
-                if result is None:
-                    result = {
-                        "tool": tool_name,
-                        "success": False,
-                        "output": "Tool returned None",
-                        "args": args,
-                        "kwargs": kwargs
-                    }
-                elif isinstance(result, dict):
-                    if "tool" not in result:
-                        result["tool"] = tool_name
-                    if "args" not in result:
-                        result["args"] = args
-                    if "kwargs" not in result:
-                        result["kwargs"] = kwargs
-                else:
-                    result = {
-                        "tool": tool_name,
-                        "success": True,
-                        "output": result,
-                        "args": args,
-                        "kwargs": kwargs
-                    }
-                
-                results.append(result)
+                results.append(_execute_tool_call(tool_name, args, kwargs))
                 
             except Exception as e:
                 results.append({

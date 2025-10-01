@@ -254,7 +254,13 @@ def run_repl(deps: Dict[str, Any]) -> None:
 
         plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
         plan_for_dispatch = maybe_convert_write_to_edit(plan_for_dispatch, user_text)
-        from .main import filter_invalid_read_steps  # local import to avoid cycle at module load
+        from .main import (
+            filter_invalid_read_steps,
+            inject_pre_delete_glob,
+            resolve_edit_entire_old_content,
+        )  # local import to avoid cycle at module load
+        plan_for_dispatch = resolve_edit_entire_old_content(plan_for_dispatch, user_text)
+        plan_for_dispatch = inject_pre_delete_glob(plan_for_dispatch)
         plan_for_dispatch = filter_invalid_read_steps(plan_for_dispatch)
 
         to_dispatch = {"steps": plan_for_dispatch.get("steps", [])}
