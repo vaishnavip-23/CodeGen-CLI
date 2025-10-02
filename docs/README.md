@@ -62,5 +62,3 @@ can you create a file called hello.py with the hello world code
 This project uses the **MIT License**. See the `LICENSE` file for details.
 
 *Inspired by Claude Code and Cursor CLI. Powered by Gemini.*
-
-
