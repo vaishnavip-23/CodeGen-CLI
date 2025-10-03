@@ -7,6 +7,8 @@ Keeps conversational, non-tool responses separate from the core REPL logic.
 import os
 from typing import Callable
 
+from . import output
+
 
 def handle_small_talk(user_text: str, append_history: Callable[[str, dict, list], None]) -> bool:
     """Handle common greetings, capability questions, and API key status.
@@ -21,19 +23,19 @@ def handle_small_talk(user_text: str, append_history: Callable[[str, dict, list]
         "hiya", "yo", "yo!", "hey!", "hi!"
     }
     if s in greetings or (s.startswith(("hi", "hey", "hello")) and len(s) <= 10):
-        print("Assistant: Hello! How can I help you with your repository?")
+        output.print_assistant("Hello! How can I help you with your repository?")
         append_history(user_text, {"steps": [], "explain": "greeting"}, [])
         return True
 
     # Casual greetings
     if s in {"sup", "what's up", "whats up", "wassup", "howdy", "greetings"}:
-        print("Assistant: Hey there! Ready to work on some code? What can I help you with?")
+        output.print_assistant("Hey there! Ready to work on some code? What can I help you with?")
         append_history(user_text, {"steps": [], "explain": "casual_greeting"}, [])
         return True
 
     # Thanks
     if s in {"thanks", "thank you", "thx", "ty", "appreciate it", "thanks!"}:
-        print("Assistant: You're welcome! Happy to help. Anything else you'd like to work on?")
+        output.print_assistant("You're welcome! Happy to help. Anything else you'd like to work on?")
         append_history(user_text, {"steps": [], "explain": "thanks"}, [])
         return True
 
@@ -74,20 +76,20 @@ Try commands like:
 - grep TODO in .
 - delete the hello.py file
 """
-        print("Assistant:", reply)
+        output.print_assistant(reply)
         append_history(user_text, {"steps": [], "explain": "capabilities_reply"}, [])
         return True
 
     # Name
     if "your name" in s or "who are you" in s:
-        print("Assistant: I am a local CLI coding assistant (Agent). I work on this repo's files.")
+        output.print_assistant("I am a local CLI coding assistant (Agent). I work on this repo's files.")
         append_history(user_text, {"steps": [], "explain": "name_reply"}, [])
         return True
 
     # Short small talk
     for marker in {"thanks", "thank you", "bye", "goodbye"}:
         if marker in s:
-            print("Assistant: You're welcome.")
+            output.print_assistant("You're welcome.")
             append_history(user_text, {"steps": [], "explain": "small_talk_reply"}, [])
             return True
 
@@ -98,10 +100,10 @@ Try commands like:
     ):
         has_key = bool(os.environ.get("GEMINI_API_KEY"))
         if has_key:
-            print("Assistant: Yes — GEMINI_API_KEY is set and will be used.")
+            output.print_assistant("Yes — GEMINI_API_KEY is set and will be used.")
             append_history(user_text, {"steps": [], "explain": "api_key_status_yes"}, [])
         else:
-            print("Assistant: No — GEMINI_API_KEY is not set. Run 'codegen --set-key' in your terminal or add it to your .env.")
+            output.print_assistant("No — GEMINI_API_KEY is not set. Run 'codegen --set-key' in your terminal or add it to your .env.")
             append_history(user_text, {"steps": [], "explain": "api_key_status_no"}, [])
         return True
 
