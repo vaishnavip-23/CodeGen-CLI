@@ -5,27 +5,43 @@ This module contains the interactive loop and related helpers, keeping
 `main.py` focused on configuration and orchestration.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
-def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: bool):
-    print("🚀 CodeGen CLI - Universal Coding Agent")
-    print("=" * 50)
-    print(f"Workspace: {workspace_root}")
-    print(f"Language: {project_info['language']}")
+def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: bool, output_module):
+    color = output_module.Color
+
+    title_line = f"{color.ACCENT}{color.BOLD}CodeGen CLI{color.RESET} {color.MUTED}— Universal Coding Agent{color.RESET}"
+
+    details = [
+        f"{color.MUTED}Workspace:{color.RESET} {workspace_root}",
+        f"{color.MUTED}Language:{color.RESET} {project_info['language']}",
+    ]
+
     if project_info.get('package_manager'):
-        print(f"Package Manager: {project_info['package_manager']}")
-    print(f"Gemini API key: {'set' if has_key else 'missing'}")
-    print("Type 'help' for help. Try natural language like 'summarize the repo'.")
-    print("Non-destructive steps run immediately. Destructive steps require confirmation.")
-    print("NOTE: For best results, keep CodeGen-CLI up to date.")
-    print("  - Check latest: codegen --check-update")
-    print("  - Upgrade: pip install -U codegen-cli")
-    print("  - Pin specific: pip install codegen-cli==<version>")
-    print("  - PyPI: https://pypi.org/project/codegen-cli/")
+        details.append(f"{color.MUTED}Package Manager:{color.RESET} {project_info['package_manager']}")
+
+    key_color = color.SUCCESS if has_key else color.ERROR
+    key_label = "set" if has_key else "missing"
+    details.append(f"{color.MUTED}Gemini API key:{color.RESET} {key_color}{key_label}{color.RESET}")
+
+    tips = [
+        f"{color.ACCENT}Tips{color.RESET}:",
+        "  • Type 'help' for guidance or ask in natural language.",
+        "  • Non-destructive steps run immediately; destructive ones ask first.",
+        "  • Keep CodeGen-CLI up to date:",
+        "      - Check latest: codegen --check-update",
+        "      - Upgrade: pip install -U codegen-cli",
+        "      - Pin specific: pip install codegen-cli==<version>",
+        "      - PyPI: https://pypi.org/project/codegen-cli/",
+    ]
+
     if not has_key:
-        print("Tip: run 'codegen --set-key' or add GEMINI_API_KEY to your .env")
-    print("=" * 50)
+        tips.append(f"  • {color.ERROR}Tip:{color.RESET} run 'codegen --set-key' or add GEMINI_API_KEY to your .env")
+
+    banner_body = "\n".join([title_line, ""] + details + [""] + tips)
+
+    output_module.print_boxed("Welcome", banner_body, style="banner")
 
 
 def _simple_split_first_word(line: str) -> str:
@@ -68,12 +84,7 @@ def _parse_as_tool_invocation(line: str):
 
 def _print_recursive_listing(list_repo_files_recursive, output):
     files = list_repo_files_recursive(".")
-    try:
-        output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
-    except Exception:
-        print("--- Repository files (recursive) ---")
-        for p in files:
-            print(p)
+    output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
 
 
 def run_repl(deps: Dict[str, Any]) -> None:
@@ -106,13 +117,13 @@ def run_repl(deps: Dict[str, Any]) -> None:
 
     ensure_client()
     import os
-    _print_intro(workspace_root, project_info, bool(os.environ.get("GEMINI_API_KEY")))
+    _print_intro(workspace_root, project_info, bool(os.environ.get("GEMINI_API_KEY")), output)
 
     while True:
         try:
             line = input("\n>>> ")
         except (EOFError, KeyboardInterrupt):
-            print("\nExiting.")
+            output.print_info("Exiting session.", title="Session")
             break
         if line is None:
             continue
@@ -125,10 +136,10 @@ def run_repl(deps: Dict[str, Any]) -> None:
             try:
                 output.print_help(project_info)
             except Exception:
-                print("Help: try natural language or tool invocations like 'read README.md' or 'list files'.")
+                output.print_assistant("Help: try natural language or tool invocations like 'read README.md' or 'list files'.")
             continue
         if low in ("exit", "quit"):
-            print("Bye.")
+            output.print_assistant("Bye.")
             break
 
         if low in ("list files", "list all files", "ls -r", "ls -R"):
@@ -223,7 +234,7 @@ def run_repl(deps: Dict[str, Any]) -> None:
         if isinstance(plan, dict) and isinstance(plan.get("steps"), list) and len(plan.get("steps")) == 0:
             explain = plan.get("explain", "").strip()
             if explain:
-                print("Assistant:", explain)
+                output.print_assistant(explain)
                 append_history(user_text, plan, [])
                 continue
 
@@ -236,9 +247,10 @@ def run_repl(deps: Dict[str, Any]) -> None:
         run_full_plan = True
         if destructive:
             output.print_boxed("Plan Summary (before execution)", plan.get("explain", "(no explain)"))
-            print("Can I make these changes?")
+            prompt_lines = ["Can I make these changes?"]
             for idx, step in destructive:
-                print(f"  {idx}. {step.get('tool')} args={step.get('args')}")
+                prompt_lines.append(f"  {idx}. {step.get('tool')} args={step.get('args')}")
+            output.print_prompt("\n".join(prompt_lines), title="Confirm Changes")
             ans = input("(y/n) ").strip().lower()
             if ans not in ("y", "yes"):
                 run_full_plan = False
@@ -247,10 +259,10 @@ def run_repl(deps: Dict[str, Any]) -> None:
         if not run_full_plan and destructive:
             steps_to_run = [s for s in steps_to_run if not (isinstance(s, dict) and s.get("tool", "").lower() in destructive_tools)]
             if not steps_to_run:
-                print("No non-destructive steps to run. Skipping.")
+                output.print_warning("No non-destructive steps to run. Skipping.", title="Plan")
                 append_history(user_text, plan, [])
                 continue
-            print("Running non-destructive steps only (destructive skipped).")
+            output.print_warning("Running non-destructive steps only (destructive skipped).", title="Plan")
 
         plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
         plan_for_dispatch = maybe_convert_write_to_edit(plan_for_dispatch, user_text)

@@ -4,92 +4,202 @@ Output formatting utilities for CodeGen2 CLI agent.
 Provides colored, structured output for user interactions, tool results, and error messages.
 """
 
-import os
-import textwrap
-from typing import Dict, Any, List
-from pathlib import Path
 import json
+import os
 import re
+import shutil
+import sys
+import textwrap
+from typing import Any, Dict, List
 
-BOX_WIDTH = 78
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _supports_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    try:
+        return sys.stdout.isatty()  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
+USE_COLOR = _supports_color()
+
+
+def _color(code: str) -> str:
+    return code if USE_COLOR else ""
+
 
 class Color:
     """ANSI color codes for terminal output."""
-    RESET = "\033[0m"
-    HEADER = "\033[95m"
-    BORDER = "\033[90m"
-    SUCCESS = "\033[92m"
-    ERROR = "\033[91m"
-    TOOL = "\033[96m"
-    CODE = "\033[93m"
-    KEYWORD = "\033[94m"
-    STRING = "\033[92m"
-    COMMENT = "\033[90m"
-    LINENO = "\033[90m"
-    BOLD = "\033[1m"
 
-# ---------------------------
-# Box Drawing Helpers
-# ---------------------------
-def _box_border() -> str:
-    """Create top/bottom border for boxes."""
-    return f"{Color.BORDER}+{'-' * (BOX_WIDTH - 2)}+{Color.RESET}"
+    RESET = _color("\033[0m")
+    BOLD = _color("\033[1m")
+    BORDER = _color("\033[38;5;244m")
+    HEADER = _color("\033[38;5;213m")
+    TITLE = _color("\033[38;5;81m")
+    SUCCESS = _color("\033[38;5;82m")
+    ERROR = _color("\033[38;5;203m")
+    TOOL = _color("\033[38;5;117m")
+    CODE = _color("\033[38;5;215m")
+    KEYWORD = _color("\033[38;5;208m")
+    STRING = _color("\033[38;5;150m")
+    COMMENT = _color("\033[38;5;244m")
+    LINENO = _color("\033[38;5;240m")
+    TEXT = _color("\033[38;5;252m")
+    MUTED = _color("\033[38;5;245m")
+    ACCENT = _color("\033[38;5;141m")
 
-def _box_header(title: str) -> str:
-    """Create boxed header with title."""
-    return f"{Color.BORDER}+{'-'*(BOX_WIDTH-2)}+{Color.RESET}\n{Color.BORDER}|{Color.RESET} {Color.HEADER}{title.ljust(BOX_WIDTH-4)}{Color.RESET} {Color.BORDER}|{Color.RESET}\n{Color.BORDER}+{'-'*(BOX_WIDTH-2)}+{Color.RESET}"
 
-def _wrap_lines(text: str, width: int = BOX_WIDTH - 4) -> List[str]:
-    """Wrap text to specified width."""
+MIN_BOX_WIDTH = 48
+MAX_BOX_WIDTH = 110
+
+
+def _visible_len(text: str) -> int:
+    return len(ANSI_ESCAPE_RE.sub("", text))
+
+
+def _contains_ansi(text: str) -> bool:
+    return bool(ANSI_ESCAPE_RE.search(text))
+
+
+def _current_box_width() -> int:
+    env_width = os.environ.get("CODEGEN_BOX_WIDTH")
+    if env_width:
+        try:
+            forced = int(env_width)
+            if forced >= 40:
+                return min(forced, MAX_BOX_WIDTH)
+        except ValueError:
+            pass
+
+    columns = shutil.get_terminal_size(fallback=(96, 24)).columns
+    available = max(columns - 4, 40)
+    width = min(max(available, MIN_BOX_WIDTH), MAX_BOX_WIDTH)
+    if width % 2:
+        width -= 1
+    return max(width, 40)
+
+
+def _wrap_lines(text: str, width: int) -> List[str]:
     if not text:
         return []
-    lines = text.split('\n')
-    wrapped = []
-    for line in lines:
-        if len(line) <= width:
-            wrapped.append(line)
-        else:
-            wrapped.extend(textwrap.wrap(line, width=width))
+    wrapped: List[str] = []
+    for raw in text.splitlines():
+        if raw == "":
+            wrapped.append("")
+            continue
+        if _contains_ansi(raw) or _visible_len(raw) <= width:
+            wrapped.append(raw)
+            continue
+        segments = textwrap.wrap(raw, width=width, drop_whitespace=False, replace_whitespace=False)
+        wrapped.extend(segments if segments else [""])
     return wrapped
 
-def _box_content(lines: List[str]) -> str:
-    """Format lines as boxed content."""
+
+BOX_STYLES: Dict[str, Dict[str, str]] = {
+    "info": {"border": Color.BORDER, "title": Color.TITLE + Color.BOLD, "text": Color.TEXT},
+    "input": {"border": Color.HEADER, "title": Color.HEADER + Color.BOLD, "text": Color.TEXT},
+    "error": {"border": Color.ERROR, "title": Color.ERROR + Color.BOLD, "text": Color.TEXT},
+    "success": {"border": Color.SUCCESS, "title": Color.SUCCESS + Color.BOLD, "text": Color.TEXT},
+    "action": {"border": Color.TOOL, "title": Color.TOOL + Color.BOLD, "text": Color.TEXT},
+    "banner": {"border": Color.ACCENT, "title": Color.ACCENT + Color.BOLD, "text": Color.TEXT},
+    "assistant": {"border": Color.ACCENT, "title": Color.ACCENT + Color.BOLD, "text": Color.TEXT},
+    "warning": {"border": Color.CODE, "title": Color.CODE + Color.BOLD, "text": Color.TEXT},
+    "question": {"border": Color.STRING, "title": Color.STRING + Color.BOLD, "text": Color.TEXT},
+}
+
+
+def _render_panel(title: str, lines: List[str], style: str = "info") -> str:
+    width = _current_box_width()
+    inner = width - 4
+    palette = BOX_STYLES.get(style, BOX_STYLES["info"])
+    border = palette["border"]
+    title_color = palette["title"]
+    text_color = palette["text"]
+
+    parts: List[str] = []
+    parts.append(f"{border}╭{'─' * (width - 2)}╮{Color.RESET}")
+
+    if title:
+        header = title.upper().strip()
+        centered = header.center(inner)
+        parts.append(f"{border}│{Color.RESET} {title_color}{centered}{Color.RESET} {border}│{Color.RESET}")
+        parts.append(f"{border}├{'─' * (width - 2)}┤{Color.RESET}")
+
     if not lines:
-        return ""
-    result = []
+        lines = [""]
+
     for line in lines:
-        padded = line.ljust(BOX_WIDTH - 4)
-        result.append(f"{Color.BORDER}|{Color.RESET} {padded} {Color.BORDER}|{Color.RESET}")
-    return "\n".join(result)
+        visible = line
+        if _visible_len(line) > inner and not _contains_ansi(line):
+            visible = line[:inner]
+        pad = max(0, inner - _visible_len(visible))
+        if _contains_ansi(visible):
+            content = f"{visible}{Color.RESET}{' ' * pad}"
+        else:
+            content = f"{text_color}{visible}{' ' * pad}{Color.RESET}"
+        parts.append(f"{border}│{Color.RESET} {content} {border}│{Color.RESET}")
+
+    parts.append(f"{border}╰{'─' * (width - 2)}╯{Color.RESET}")
+    return "\n".join(parts)
+
+
+def _print_panel(title: str, content: str, style: str = "info") -> None:
+    width = _current_box_width()
+    lines = _wrap_lines(content, width - 4)
+    print()
+    print(_render_panel(title, lines, style=style))
 
 # ---------------------------
 # Main Output Functions
 # ---------------------------
 def print_user_input(text: str):
-    """Display user input in a box."""
-    print(_box_header("USER"))
-    lines = _wrap_lines(text)
-    print(_box_content(lines))
-    print(_box_border())
+    """Display user input in a styled panel."""
+    _print_panel("User", text, style="input")
+
 
 def print_agent_action(tool_name: str):
     """Display agent tool usage."""
-    print(f"\nAgent : using tool : {Color.TOOL}{tool_name}{Color.RESET}")
-    print("-" * 25)
+    message = f"Using tool: {Color.TOOL}{tool_name}{Color.RESET}"
+    _print_panel("Agent", message, style="action")
 
-def print_boxed(title: str, content: str):
+
+def print_boxed(title: str, content: str, *, style: str = "info"):
     """Display content in a box with title."""
-    print(f"\n{_box_header(title)}")
-    lines = _wrap_lines(content)
-    print(_box_content(lines))
-    print(_box_border())
+    _print_panel(title, content, style=style)
+
 
 def print_error(message: str):
-    """Display error message in red box."""
-    print(f"\n{_box_header('ERROR')}")
-    lines = _wrap_lines(message)
-    print(_box_content(lines))
-    print(_box_border())
+    """Display error message in a red box."""
+    _print_panel("Error", message, style="error")
+
+
+def print_info(message: str, *, title: str = "Info"):
+    """Display informational text in standard styling."""
+    _print_panel(title, message, style="info")
+
+
+def print_success(message: str, *, title: str = "Success"):
+    """Display success feedback."""
+    _print_panel(title, message, style="success")
+
+
+def print_warning(message: str, *, title: str = "Warning"):
+    """Display warnings or cautionary notes."""
+    _print_panel(title, message, style="warning")
+
+
+def print_assistant(message: str, *, title: str = "Assistant"):
+    """Display assistant chat responses."""
+    _print_panel(title, message, style="assistant")
+
+
+def print_prompt(message: str, *, title: str = "Confirm"):
+    """Display prompts requiring user confirmation."""
+    _print_panel(title, message, style="question")
+
 
 def print_help(project_info=None):
     """Display help information."""
@@ -219,72 +329,104 @@ def _format_code_content(content: str, language: str = "python") -> str:
 # ---------------------------
 # Tool Result Display
 # ---------------------------
-def _print_task_summary(output_data: Dict[str, Any]):
-    """Display formatted summary from Task tool."""
-    bold = Color.BOLD
-    reset = Color.RESET
+def _task_summary_lines(output_data: Dict[str, Any]) -> List[str]:
+    """Build formatted summary lines for the Task tool."""
+    if not isinstance(output_data, dict):
+        return []
 
-    if "summary" in output_data:
-        print(f"{bold}Codebase Summary:{reset}")
-        print(output_data["summary"])
-        print()
+    lines: List[str] = []
 
-    if "files_count" in output_data:
-        print(f"{bold}File Counts:{reset}")
-        print(f"  - Total files: {output_data['files_count']}")
-        if "files_by_extension" in output_data:
-            for ext, count in output_data["files_by_extension"].items():
-                print(f"    - {ext}: {count}")
-    print()
+    summary = output_data.get("summary")
+    if summary:
+        lines.append(f"{Color.ACCENT}Summary{Color.RESET}")
+        lines.append(summary.strip())
 
-    if "top_level" in output_data:
-        print(f"{bold}Top-Level Files and Directories:{reset}")
-        for item in output_data["top_level"]:
-            print(f"  - {item}")
-    print()
+    files_count = output_data.get("files_count")
+    files_by_ext = output_data.get("files_by_extension", {})
+    if files_count is not None:
+        if lines:
+            lines.append("")
+        lines.append(f"{Color.ACCENT}File Counts{Color.RESET}")
+        lines.append(f"  • Total files: {files_count}")
+        if isinstance(files_by_ext, dict):
+            for ext, count in files_by_ext.items():
+                lines.append(f"  • {ext}: {count}")
 
-    if "readme_excerpt" in output_data and output_data["readme_excerpt"]:
-        print(f"{bold}README Excerpt:{reset}")
-        print(output_data["readme_excerpt"])
-        print()
+    top_level = output_data.get("top_level")
+    if isinstance(top_level, list) and top_level:
+        if lines:
+            lines.append("")
+        lines.append(f"{Color.ACCENT}Top-Level Items{Color.RESET}")
+        for item in top_level:
+            lines.append(f"  • {item}")
 
-    if "behavior_excerpt" in output_data and output_data["behavior_excerpt"]:
-        print(f"{bold}Behavior Excerpt:{reset}")
-        print(output_data["behavior_excerpt"])
-        print()
+    readme_excerpt = output_data.get("readme_excerpt")
+    if readme_excerpt:
+        if lines:
+            lines.append("")
+        lines.append(f"{Color.ACCENT}README Excerpt{Color.RESET}")
+        lines.append(readme_excerpt.strip())
+
+    behavior_excerpt = output_data.get("behavior_excerpt")
+    if behavior_excerpt:
+        if lines:
+            lines.append("")
+        lines.append(f"{Color.ACCENT}Behavior Excerpt{Color.RESET}")
+        lines.append(behavior_excerpt.strip())
+
+    return lines
+
+
+def _looks_like_code(text: str) -> bool:
+    keywords = ("def ", "class ", "import ", "from ", "if ", "for ", "while ")
+    return any(keyword in text for keyword in keywords)
+
 
 def print_tool_result(tool_name: str, result: Dict[str, Any]):
-    """Display tool execution result."""
-    success = result.get("success", False)
-    header = f"[{Color.TOOL}{tool_name}{Color.RESET}] {Color.SUCCESS}OK{Color.RESET}" if success else f"[{Color.TOOL}{tool_name}{Color.RESET}] {Color.ERROR}ERROR{Color.RESET}"
-    print(header)
-    print("-" * (len(header) - (len(Color.TOOL) + len(Color.SUCCESS) + 2*len(Color.RESET)) if success else len(header) - (len(Color.TOOL) + len(Color.ERROR) + 2*len(Color.RESET))))
-    
-    output_data = result.get("output")
-    
-    # Special handling for Task tool
-    if tool_name.lower() == "task" and isinstance(output_data, dict):
-        _print_task_summary(output_data)
-        print("-" * (len(header) - (len(Color.TOOL) + len(Color.SUCCESS) + 2*len(Color.RESET)) if success else len(header) - (len(Color.TOOL) + len(Color.ERROR) + 2*len(Color.RESET))))
-        return
+    """Display tool execution result in a styled panel."""
+    success = bool(result.get("success", False))
+    style = "success" if success else "error"
+    status_label = "OK" if success else "ERROR"
+    status_color = Color.SUCCESS if success else Color.ERROR
+    status_line = f"{status_color}Status: {status_label}{Color.RESET}"
 
-    # Display output data
-    if isinstance(output_data, (dict, list)):
+    content_blocks: List[str] = [status_line]
+
+    message = result.get("message")
+    if isinstance(message, str) and message.strip():
+        content_blocks.append(message.strip())
+
+    if not success and result.get("error"):
+        content_blocks.append(str(result["error"]))
+
+    output_data = result.get("output")
+
+    if tool_name.lower() == "task" and isinstance(output_data, dict):
+        task_lines = _task_summary_lines(output_data)
+        if task_lines:
+            content_blocks.append("\n".join(task_lines))
+    elif isinstance(output_data, (dict, list)):
         try:
-            formatted = json.dumps(output_data, indent=2)
-            print(formatted)
+            content_blocks.append(json.dumps(output_data, indent=2))
         except Exception:
-            print(str(output_data))
+            content_blocks.append(str(output_data))
     elif isinstance(output_data, str):
-        # Check if it looks like code
-        if any(keyword in output_data for keyword in ["def ", "class ", "import ", "from ", "if ", "for ", "while "]):
-            print(f"{Color.CODE}```python{Color.RESET}")
-            print(_format_code_content(output_data))
-            print(f"{Color.CODE}```{Color.RESET}")
-        else:
-            print(output_data)
-    else:
-        print(str(output_data) if output_data is not None else "")
+        text = output_data.strip("\n")
+        if _looks_like_code(text):
+            code_block = "\n".join([
+                f"{Color.CODE}```python{Color.RESET}",
+                _format_code_content(text),
+                f"{Color.CODE}```{Color.RESET}",
+            ])
+            content_blocks.append(code_block)
+        elif text:
+            content_blocks.append(text)
+    elif output_data is not None:
+        content_blocks.append(str(output_data))
+
+    title = f"{tool_name} • {status_label}"
+    body = "\n\n".join(block for block in content_blocks if block)
+    print_boxed(title, body if body else status_line, style=style)
 
 # ---------------------------
 # Legacy Function Names (for compatibility)
