@@ -151,24 +151,32 @@ def _check_update():
     """Print update status comparing installed vs PyPI latest."""
     installed = _get_installed_version()
     latest = _get_pypi_latest_version("codegen-cli")
-    print("CodeGen-CLI version check")
-    print("-------------------------")
-    print(f"Installed: {installed}")
-    print(f"Latest on PyPI: {latest}")
+    color = output.Color
+
+    lines = [
+        f"{color.MUTED}Installed:{color.RESET} {installed}",
+        f"{color.MUTED}Latest on PyPI:{color.RESET} {latest}",
+    ]
+
+    style = "info"
+
     if installed == "unknown" or latest == "unknown":
-        print("Could not determine versions. Ensure internet connectivity and that the package is installed.")
-        return
-    cmp = _compare_versions(installed, latest)
-    if cmp < 0:
-        print("A newer version is available.")
-        print("Upgrade with:")
-        print("  pip install -U codegen-cli")
-        print("Or if installed via pipx:")
-        print("  pipx upgrade codegen-cli")
-    elif cmp == 0:
-        print("You are up to date.")
+        lines.append("Could not determine versions. Ensure internet connectivity and that the package is installed.")
     else:
-        print("You are ahead of the latest PyPI release (pre-release or local build).")
+        cmp = _compare_versions(installed, latest)
+        if cmp < 0:
+            style = "warning"
+            lines.append(f"{color.CODE}A newer version is available.{color.RESET}")
+            lines.append("Upgrade with:")
+            lines.append("  • pip install -U codegen-cli")
+            lines.append("  • pipx upgrade codegen-cli")
+        elif cmp == 0:
+            style = "success"
+            lines.append(f"{color.SUCCESS}You are up to date.{color.RESET}")
+        else:
+            lines.append("You are ahead of the latest PyPI release (pre-release or local build).")
+
+    output.print_boxed("Version Check", "\n".join(lines), style=style)
 
 # File paths
 WORKSPACE_ROOT = os.getcwd()
@@ -495,25 +503,25 @@ def handle_small_talk(user_text: str) -> bool:
     # Handle various greeting patterns
     greetings = {"hi", "hii", "hiii", "hiiii", "hello", "hey", "heyy", "heyyy", "hiya", "yo", "yo!", "hey!", "hi!"}
     if s in greetings:
-        print("Assistant: Hello! How can I help you with your repository?")
+        output.print_assistant("Hello! How can I help you with your repository?")
         append_history(user_text, {"steps": [], "explain": "greeting"}, [])
         return True
     
     # Handle greetings with punctuation or extra characters
     if s.startswith(("hi", "hey", "hello")) and len(s) <= 10:
-        print("Assistant: Hello! How can I help you with your repository?")
+        output.print_assistant("Hello! How can I help you with your repository?")
         append_history(user_text, {"steps": [], "explain": "greeting"}, [])
         return True
     
     # Handle casual responses
     if s in {"sup", "what's up", "whats up", "wassup", "howdy", "greetings"}:
-        print("Assistant: Hey there! Ready to work on some code? What can I help you with?")
+        output.print_assistant("Hey there! Ready to work on some code? What can I help you with?")
         append_history(user_text, {"steps": [], "explain": "casual_greeting"}, [])
         return True
     
     # Handle thanks and appreciation
     if s in {"thanks", "thank you", "thx", "ty", "appreciate it", "thanks!"}:
-        print("Assistant: You're welcome! Happy to help. Anything else you'd like to work on?")
+        output.print_assistant("You're welcome! Happy to help. Anything else you'd like to work on?")
         append_history(user_text, {"steps": [], "explain": "thanks"}, [])
         return True
 
@@ -523,10 +531,10 @@ def handle_small_talk(user_text: str) -> bool:
     if any(m in s for m in api_markers) and ("set" in s or "configured" in s or "present" in s or "loaded" in s or "right" in s or "proper" in s or "ok" in s):
         has_key = bool(os.environ.get("GEMINI_API_KEY"))
         if has_key:
-            print("Assistant: Yes — GEMINI_API_KEY is set and will be used. 'codegen --set-key' is a one-time user-level setup and can be run from any directory.")
+            output.print_assistant("Yes — GEMINI_API_KEY is set and will be used. 'codegen --set-key' is a one-time user-level setup and can be run from any directory.")
             append_history(user_text, {"steps": [], "explain": "api_key_status_yes"}, [])
         else:
-            print("Assistant: No — GEMINI_API_KEY is not set. Run 'codegen --set-key' in your terminal or add it to your .env.")
+            output.print_assistant("No — GEMINI_API_KEY is not set. Run 'codegen --set-key' in your terminal or add it to your .env.")
             append_history(user_text, {"steps": [], "explain": "api_key_status_no"}, [])
         return True
 
@@ -562,19 +570,19 @@ I am a repository-aware CLI coding assistant that can interact with your codebas
 - **Command Security**: Blocks dangerous shell commands
 
 I can help you with code analysis, file management, project organization, and much more!"""
-        print("Assistant:", reply)
+        output.print_assistant(reply)
         append_history(user_text, {"steps": [], "explain": "capabilities_reply"}, [])
         return True
 
     if "your name" in s or "who are you" in s:
-        print("Assistant: I am a local CLI coding assistant (Agent). I work on this repo's files.")
+        output.print_assistant("I am a local CLI coding assistant (Agent). I work on this repo's files.")
         append_history(user_text, {"steps": [], "explain": "name_reply"}, [])
         return True
 
     short_small = {"thanks", "thank you", "bye", "goodbye"}
     for marker in short_small:
         if marker in s:
-            print("Assistant: You're welcome.")
+            output.print_assistant("You're welcome.")
             append_history(user_text, {"steps": [], "explain": "small_talk_reply"}, [])
             return True
 
@@ -666,12 +674,7 @@ def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) ->
 def print_recursive_listing():
     """Print all repository files."""
     files = list_repo_files_recursive(".")
-    try:
-        output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
-    except Exception:
-        print("--- Repository files (recursive) ---")
-        for p in files:
-            print(p)
+    output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
 
 # ---------------------------
 # Write to Edit Conversion
@@ -925,34 +928,20 @@ def main():
                 ver = _m.version("codegen-cli")
             except Exception:
                 ver = "unknown"
-            print(f"CodeGen-CLI v{ver}")
-            print("Universal CLI coding agent that understands any codebase")
+            body = "\n".join([
+                f"{output.Color.ACCENT}{output.Color.BOLD}CodeGen-CLI v{ver}{output.Color.RESET}",
+                "Universal CLI coding agent that understands any codebase",
+            ])
+            output.print_boxed("Version", body, style="info")
             return
         elif arg in ("--check-update", "check-update", "update", "--update"):
             _check_update()
             return
         elif arg in ("--help", "-h", "help"):
-            print("CodeGen-CLI - Universal Coding Agent")
-            print("")
-            print("Usage:")
-            print("  codegen                    # Start interactive CLI")
-            print("  codegen --help            # Show this help")
-            print("  codegen --version         # Show version")
-            print("  codegen --check-update    # Check if a newer version is available on PyPI")
-            print("  codegen --set-key [KEY]   # Save GEMINI_API_KEY to user config")
-            print("")
-            print("PyPI: https://pypi.org/project/codegen-cli/")
-            print("")
-            print("Setup Required:")
-            print("  • Run 'codegen --set-key' and paste your Gemini API key")
-            print("  • Or set GEMINI_API_KEY via shell export or .env files")
-            print("  • Get API key from: https://aistudio.google.com/api-keys")
-            print("")
-            print("Features:")
-            print("  • Universal compatibility with any codebase")
-            print("  • Natural language interface")
-            print("  • Smart project detection")
-            print("  • Safety-first approach")
+            try:
+                output.print_help(PROJECT_INFO)
+            except Exception:
+                output.print_info("CodeGen-CLI - Universal Coding Agent", title="Help")
             return
         elif arg in ("--set-key", "set-key"):
             # Accept key from argv or prompt interactively
@@ -963,10 +952,10 @@ def main():
                 try:
                     key = input("Enter your Gemini API key: ").strip()
                 except (EOFError, KeyboardInterrupt):
-                    print("Aborted.")
+                    output.print_warning("Aborted.", title="Setup")
                     return
             if not key:
-                print("No key provided.")
+                output.print_warning("No key provided.", title="Setup")
                 return
             cfg_dir = Path.home() / ".config" / "codegen"
             cfg_dir.mkdir(parents=True, exist_ok=True)
@@ -974,19 +963,19 @@ def main():
             try:
                 with cfg_file.open("w", encoding="utf-8") as f:
                     f.write(f"GEMINI_API_KEY={key}\n")
-                print(f"Saved API key to {cfg_file}")
+                output.print_success(f"Saved API key to {cfg_file}", title="Setup")
                 # Update current process env and client
                 os.environ["GEMINI_API_KEY"] = key
                 global API_KEY
                 API_KEY = key
                 _ensure_client()
-                print("You're all set! Run 'codegen' in any project.")
+                output.print_success("You're all set! Run 'codegen' in any project.", title="Setup")
             except Exception as e:
-                print(f"Failed to save API key: {e}")
+                output.print_error(f"Failed to save API key: {e}")
             return
         else:
-            print(f"Unknown option: {arg}")
-            print("Use 'codegen --help' for usage information")
+            output.print_warning(f"Unknown option: {arg}", title="CLI")
+            output.print_info("Use 'codegen --help' for usage information", title="CLI")
             return
     
     # Start the REPL
