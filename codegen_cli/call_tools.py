@@ -156,7 +156,7 @@ def _extract_args_kwargs_from_use(tool_name: str, use: Dict[str, Any]) -> Tuple[
         return False
 
     if not args:
-        if lowered in {"read", "write", "edit", "delete", "ls"}:
+        if lowered in {"read", "write", "edit", "delete", "ls", "python_run", "python_check"}:
             if not _pop_first(["path", "file_path", "target", "directory"]):
                 _pop_first(["pattern"])
         elif lowered == "glob":
