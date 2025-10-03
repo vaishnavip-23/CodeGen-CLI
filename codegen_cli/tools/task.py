@@ -194,6 +194,18 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
 
         # Build one-line descriptions per top-level entry
         described = [f"- {p.name}: {_describe_entry(p)}" for p in sorted(top_level_paths, key=lambda x: x.name.lower())]
+        dir_names = [p.name for p in top_level_paths if p.is_dir()]
+        file_names = [p.name for p in top_level_paths if p.is_file()]
+
+        line_limit = None
+        if prompt:
+            import re
+            match = re.search(r"\b(\d+)\s+lines?\b", prompt.lower())
+            if match:
+                try:
+                    line_limit = max(1, min(40, int(match.group(1))))
+                except ValueError:
+                    line_limit = None
 
         # Try multiple README-like files
         readme_candidates = [
@@ -230,8 +242,43 @@ def call(description: str = "", prompt: str = "", subagent_type: str = "general-
         readme_section = ""
         behavior_section = ""
 
-        # Create a concise, structured summary (<=600 words)
-        summary_text = f"""
+        if line_limit:
+            project_label = ROOT.name or "This project"
+            line_candidates = [
+                f"{project_label} is a repository-aware CLI coding agent focused on safe, tool-driven codebase edits."
+            ]
+            if Path("codegen_cli").exists():
+                line_candidates.append("The `codegen_cli` package houses the entrypoint, REPL workflow, and modular tool implementations.")
+            if dir_names:
+                dir_snippet = ", ".join(sorted(dir_names)[:3]) + (" ..." if len(dir_names) > 3 else "")
+                line_candidates.append(f"Key directories include {dir_snippet}.")
+            if file_names:
+                file_snippet = ", ".join(sorted(file_names)[:3]) + (" ..." if len(file_names) > 3 else "")
+                line_candidates.append(f"Important top-level files: {file_snippet}.")
+            if Path("codegen_cli/config").exists():
+                line_candidates.append("Configuration under `codegen_cli/config` defines the system prompt and behavior heuristics for the agent.")
+            if Path("codegen_cli/tools").exists():
+                line_candidates.append("Modules in `codegen_cli/tools` wrap safe operations such as read, edit, python_run, and python_check.")
+            if Path("test").exists() or Path("tests").exists():
+                line_candidates.append("A test suite in the test/tests directory helps validate tool behavior.")
+            if Path("docs").exists():
+                line_candidates.append("Documentation lives in docs/ alongside the project root README.")
+            if by_ext:
+                ext_pairs = ", ".join(f"{ext}: {count}" for ext, count in by_ext.most_common(3))
+                if ext_pairs:
+                    line_candidates.append(f"File-type snapshot (top-level): {ext_pairs}.")
+            line_candidates.append("The workflow emphasizes discovery-first exploration, targeted edits, and confirmations before destructive steps.")
+
+            extra_lines = [entry[2:].replace(":", " —", 1) for entry in described]
+            for entry in extra_lines:
+                if entry not in line_candidates:
+                    line_candidates.append(entry)
+            while len(line_candidates) < line_limit:
+                line_candidates.append("Additional repository files supply packaging metadata and support assets for the CLI.")
+            summary_text = "\n".join(line_candidates[:line_limit])
+        else:
+            # Create a concise, structured summary (<=600 words)
+            summary_text = f"""
 # Repository Summary
 
 ## Overview
@@ -251,8 +298,8 @@ High-level: A repository-aware CLI coding agent that executes safe, tool-driven 
 1) Discover with LS/Glob → 2) Inspect with Read/Grep → 3) Plan (LLM) with confirmation → 4) Execute tools
 """
 
-        # Apply strict 600-word limit to summary
-        summary_text = _truncate_to_word_limit(summary_text, 600)
+            # Apply strict 600-word limit to summary
+            summary_text = _truncate_to_word_limit(summary_text, 600)
         
         # Return only the composed summary to avoid duplicate sections in renderer
         out = {
