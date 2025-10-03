@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Grep tool for searching file contents.
+
 """
 Grep tool - searches for text patterns in files using glob patterns.
 """
@@ -59,11 +61,11 @@ def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
         }
     
     try:
-        # Find files matching pattern
+                                     
         search_path = os.path.join(WORKSPACE, path_pattern)
         files = glob(search_path, recursive=True)
         
-        # Filter to only safe paths
+                                   
         safe_files = [f for f in files if is_safe_path(f)]
         
         if not safe_files:
@@ -73,13 +75,13 @@ def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
                 "output": "No files found matching pattern"
             }
         
-        # Search in files
+                         
         all_matches = []
         for file_path in safe_files:
             matches = search_in_file(file_path, pattern, multiline)
             all_matches.extend(matches)
         
-        # Apply head limit
+                          
         if head_limit and len(all_matches) > head_limit:
             all_matches = all_matches[:head_limit]
         
@@ -96,7 +98,7 @@ def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
                 "success": True,
                 "output": len(all_matches)
             }
-        else:  # content mode
+        else:                
             return {
                 "tool": "grep",
                 "success": True,

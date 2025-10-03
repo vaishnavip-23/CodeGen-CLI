@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Glob tool for path discovery.
+
 """
 File Pattern Matching Tool for CodeGen-CLI
 
@@ -9,7 +11,7 @@ import os
 import glob
 from typing import List, Dict, Any
 
-# Get the current workspace directory
+                                     
 WORKSPACE = os.getcwd()
 
 def is_safe_path(file_path: str) -> bool:
@@ -23,11 +25,11 @@ def is_safe_path(file_path: str) -> bool:
         True if safe, False if outside workspace
     """
     try:
-        # Convert to absolute path
+                                  
         abs_path = os.path.abspath(file_path)
         workspace_path = os.path.abspath(WORKSPACE)
         
-        # Check if the file is within the workspace
+                                                   
         return os.path.commonpath([workspace_path, abs_path]) == workspace_path
     except (ValueError, OSError):
         return False
@@ -45,21 +47,21 @@ def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
         Dictionary with success status and list of matching files
     """
     try:
-        # Create full pattern path
+                                  
         full_pattern = os.path.join(WORKSPACE, pattern)
         
-        # Find matching files
+                             
         matches = glob.glob(full_pattern, recursive=True)
         
-        # Filter to only include safe paths
+                                           
         safe_matches = []
         for match in matches:
             if is_safe_path(match):
-                # Get relative path for display
+                                               
                 rel_path = os.path.relpath(match, WORKSPACE)
                 safe_matches.append(rel_path)
         
-        # Sort results for consistent output
+                                            
         safe_matches.sort()
         
         return {

@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Write tool for creating or overwriting files.
+
 """
 Write tool - creates or overwrites files safely within workspace.
 """

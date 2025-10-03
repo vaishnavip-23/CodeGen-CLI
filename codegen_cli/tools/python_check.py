@@ -1,3 +1,5 @@
+# File Summary: Implementation of the python_check tool for syntax validation.
+
 """Python syntax checker for CodeGen CLI."""
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ def call(path: str, *args, **kwargs) -> Dict[str, Any]:
             "success": True,
             "output": "Syntax OK",
         }
-    except py_compile.PyCompileError as exc:  # pragma: no cover - runtime dependent
+    except py_compile.PyCompileError as exc:                                        
         return {
             "tool": "python_check",
             "success": False,
@@ -53,7 +55,7 @@ def call(path: str, *args, **kwargs) -> Dict[str, Any]:
             "error": str(exc),
             "details": exc.msg if hasattr(exc, "msg") else None,
         }
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:                                
         return {
             "tool": "python_check",
             "success": False,

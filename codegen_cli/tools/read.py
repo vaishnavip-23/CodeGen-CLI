@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Read tool for inspecting file contents.
+
 """
 Read tool - reads file contents safely within workspace.
 """
@@ -37,7 +39,7 @@ def call(path: str, *args, **kwargs) -> dict:
         with open(full_path, "r", encoding="utf-8", errors="replace") as file:
             lines = file.readlines()
         
-        # Apply line limits
+                           
         if offset is not None or limit is not None:
             try:
                 start_line = int(offset) if offset is not None else 0

@@ -1,3 +1,5 @@
+# File Summary: Implementation of the MultiEdit tool for atomic batch edits.
+
 import os
 import py_compile
 import traceback
@@ -13,13 +15,13 @@ def _check_python_files(paths):
         abs_path = os.path.abspath(os.path.join(WORKSPACE, rel_path))
         try:
             py_compile.compile(abs_path, doraise=True)
-        except py_compile.PyCompileError as exc:  # pragma: no cover - runtime dependent
+        except py_compile.PyCompileError as exc:                                        
             errors.append({
                 "path": rel_path,
                 "error": str(exc),
                 "details": exc.msg if hasattr(exc, "msg") else None,
             })
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:                                
             errors.append({
                 "path": rel_path,
                 "error": f"Unexpected compile error: {exc}",

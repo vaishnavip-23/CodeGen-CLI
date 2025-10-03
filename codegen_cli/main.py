@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# File Summary: Primary application bootstrap handling environment setup and REPL startup.
+
 """
 CodeGen-CLI - Universal Coding Agent
 
@@ -14,7 +16,7 @@ from typing import Tuple, Any, Dict, List
 from pathlib import Path
 import sys
 
-# Load environment variables
+                            
 def _try_parse_env_file(path: Path) -> Dict[str, str]:
     """Parse simple .env files supporting lines like KEY=VALUE or export KEY=VALUE.
 
@@ -39,7 +41,7 @@ def _try_parse_env_file(path: Path) -> Dict[str, str]:
                 if key:
                     env[key] = value
     except Exception:
-        # Best-effort only
+                          
         return {}
     return env
 
@@ -52,14 +54,14 @@ def _load_additional_env():
       3) User .env (~/\.env)
       4) User config .env (~/.config/codegen/.env)
     """
-    # Try python-dotenv if present (loads cwd/.env by default)
+                                                              
     try:
-        from dotenv import load_dotenv  # type: ignore
+        from dotenv import load_dotenv                
         load_dotenv()
     except Exception:
         pass
 
-    # If key still missing, try additional files
+                                                
     if not os.environ.get("GEMINI_API_KEY"):
         cwd_env = _try_parse_env_file(Path.cwd() / ".env")
         if cwd_env.get("GEMINI_API_KEY"):
@@ -76,7 +78,7 @@ def _load_additional_env():
         if cfg_env.get("GEMINI_API_KEY"):
             os.environ.setdefault("GEMINI_API_KEY", cfg_env["GEMINI_API_KEY"])
 
-# Initialize Gemini API client
+                              
 _load_additional_env()
 try:
     from google import genai
@@ -100,9 +102,9 @@ def _ensure_client():
             CLIENT = None
     return CLIENT
 
-# ---------------------------
-# Version & Update Check
-# ---------------------------
+                             
+                        
+                             
 def _get_installed_version() -> str:
     try:
         import importlib.metadata as _m
@@ -113,7 +115,7 @@ def _get_installed_version() -> str:
 def _get_pypi_latest_version(package_name: str = "codegen-cli") -> str:
     """Fetch latest version string from PyPI JSON API."""
     try:
-        import requests  # type: ignore
+        import requests                
         url = f"https://pypi.org/pypi/{package_name}/json"
         resp = requests.get(url, timeout=5)
         resp.raise_for_status()
@@ -178,14 +180,14 @@ def _check_update():
 
     output.print_boxed("Version Check", "\n".join(lines), style=style)
 
-# File paths
+            
 WORKSPACE_ROOT = os.getcwd()
-# Get the directory where this file is located (codegen_cli package)
+                                                                    
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 SYSTEM_PROMPT_PATH = os.path.join(PACKAGE_DIR, "config", "system_prompt.txt")
 BEHAVIOR_PATH = os.path.join(PACKAGE_DIR, "config", "behavior.md")
 
-# History storage: write to user config dir by default (project-local disabled)
+                                                                               
 def _resolve_history_path() -> str:
     env_override = os.environ.get("CODEGEN_HISTORY_PATH")
     if env_override:
@@ -199,7 +201,7 @@ def _resolve_history_path() -> str:
 
 HISTORY_PATH = _resolve_history_path()
 
-# Project type detection
+                        
 def detect_project_type(workspace_path: str) -> dict:
     """Detect the type of project in the workspace."""
     project_info = {
@@ -209,7 +211,7 @@ def detect_project_type(workspace_path: str) -> dict:
         "file_extensions": set()
     }
     
-    # Language detection patterns
+                                 
     language_patterns = {
         'python': {
             'files': ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile'],
@@ -233,7 +235,7 @@ def detect_project_type(workspace_path: str) -> dict:
         }
     }
     
-    # Detect language
+                     
     for language, patterns in language_patterns.items():
         for file_pattern in patterns['files']:
             if os.path.exists(os.path.join(workspace_path, file_pattern)):
@@ -243,7 +245,7 @@ def detect_project_type(workspace_path: str) -> dict:
         if project_info['language'] != 'unknown':
             break
     
-    # Detect package manager
+                            
     if project_info['language'] == 'python':
         if os.path.exists(os.path.join(workspace_path, 'requirements.txt')):
             project_info['package_manager'] = 'pip'
@@ -259,21 +261,21 @@ def detect_project_type(workspace_path: str) -> dict:
     
     return project_info
 
-# Detect current project
+                        
 PROJECT_INFO = detect_project_type(WORKSPACE_ROOT)
 
-# Import local modules
+                      
 from .call_tools import dispatch_tool
 from . import output
 from . import faq as faq_handlers
 from .repl import run_repl
 
-# Tools that can modify files
+                             
 DESTRUCTIVE_TOOLS = {"write", "edit", "multiedit", "bash", "delete", "Write", "Edit", "MultiEdit", "Bash", "Delete"}
 
-# ---------------------------
-# History Management
-# ---------------------------
+                             
+                    
+                             
 def load_history(limit: int = 20) -> List[Dict[str, Any]]:
     """Load recent history from JSON file."""
     try:
@@ -298,7 +300,7 @@ def append_history(user_text: str, agent_plan: Any, results: Any):
     hist = load_history(limit=1000)
     hist.append(entry)
     try:
-        # Ensure parent exists
+                              
         parent = os.path.dirname(HISTORY_PATH)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -307,9 +309,9 @@ def append_history(user_text: str, agent_plan: Any, results: Any):
     except Exception:
         pass
 
-# ---------------------------
-# LLM Integration
-# ---------------------------
+                             
+                 
+                             
 def _load_system_behavior_and_history(history_limit: int = 8):
     """Load system prompt, behavior guidelines, and recent history."""
     try:
@@ -382,7 +384,7 @@ def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperatu
         )
     except Exception as e:
         msg = str(e)
-        # Friendly handling for common free-tier/rate-limit errors
+                                                                  
         rate_markers = [
             "rate limit", "429", "quota", "Resource has been exhausted", "Too Many Requests"
         ]
@@ -418,9 +420,9 @@ def call_llm_structured(user_text: str, max_output_tokens: int = 1024, temperatu
     except Exception as e:
         return ("ERROR:EXTRACTION", f"Failed to extract text: {e}\n{traceback.format_exc()}")
 
-# ---------------------------
-# Plan Validation
-# ---------------------------
+                             
+                 
+                             
 def validate_plan(plan: Any):
     """Validate that plan has correct structure."""
     if not isinstance(plan, dict):
@@ -493,39 +495,39 @@ def generate_plan(user_text: str, retries: int = 1):
 
     return True, plan
 
-# ---------------------------
-# Small Talk Handlers
-# ---------------------------
+                             
+                     
+                             
 def handle_small_talk(user_text: str) -> bool:
     """Handle common greetings and questions without using tools."""
     s = user_text.strip().lower()
     
-    # Handle various greeting patterns
+                                      
     greetings = {"hi", "hii", "hiii", "hiiii", "hello", "hey", "heyy", "heyyy", "hiya", "yo", "yo!", "hey!", "hi!"}
     if s in greetings:
         output.print_assistant("Hello! How can I help you with your repository?")
         append_history(user_text, {"steps": [], "explain": "greeting"}, [])
         return True
     
-    # Handle greetings with punctuation or extra characters
+                                                           
     if s.startswith(("hi", "hey", "hello")) and len(s) <= 10:
         output.print_assistant("Hello! How can I help you with your repository?")
         append_history(user_text, {"steps": [], "explain": "greeting"}, [])
         return True
     
-    # Handle casual responses
+                             
     if s in {"sup", "what's up", "whats up", "wassup", "howdy", "greetings"}:
         output.print_assistant("Hey there! Ready to work on some code? What can I help you with?")
         append_history(user_text, {"steps": [], "explain": "casual_greeting"}, [])
         return True
     
-    # Handle thanks and appreciation
+                                    
     if s in {"thanks", "thank you", "thx", "ty", "appreciate it", "thanks!"}:
         output.print_assistant("You're welcome! Happy to help. Anything else you'd like to work on?")
         append_history(user_text, {"steps": [], "explain": "thanks"}, [])
         return True
 
-    # API key status questions
+                              
     api_markers = ("api key", "apikey", "gemini key", "gemini api", "gemini")
     status_markers = ("set", "configured", "present", "available", "loaded", "right", "proper")
     if any(m in s for m in api_markers) and ("set" in s or "configured" in s or "present" in s or "loaded" in s or "right" in s or "proper" in s or "ok" in s):
@@ -588,9 +590,9 @@ I can help you with code analysis, file management, project organization, and mu
 
     return False
 
-# ---------------------------
-# Tool Invocation Parser
-# ---------------------------
+                             
+                        
+                             
 def _simple_split_first_word(line: str) -> str:
     """Get first word from line (for tool detection)."""
     if not line:
@@ -623,20 +625,20 @@ def parse_as_tool_invocation(line: str):
     tool = parts[0]
     args = parts[1:]
     kwargs = {}
-    # Special case: "list files" -> ls command
+                                              
     if tool.lower() in ("list",) and len(args) >= 1 and args[0].lower().startswith("file"):
         return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
     if tool.lower() == "ls" and not args:
         return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
     return {"tool": tool, "args": args, "kwargs": kwargs}
 
-# ---------------------------
-# File Listing
-# ---------------------------
+                             
+              
+                             
 def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) -> List[str]:
     """Get all files in repository, ignoring common build/cache directories."""
     if ignore_dirs is None:
-        # Language-specific ignore directories
+                                              
         base_ignore = {".git", ".env", ".cache"}
         language_ignore = {
             'python': {"__pycache__", ".venv", "venv", ".pytest_cache", "build", "dist"},
@@ -655,13 +657,13 @@ def list_repo_files_recursive(root: str = ".", ignore_dirs: List[str] = None) ->
     root_path = os.path.abspath(root)
     files_out = []
     for dirpath, dirnames, filenames in os.walk(root_path):
-        # Remove ignored directories from traversal
+                                                   
         dirnames[:] = [d for d in dirnames if d not in ignore_dirs and not d.startswith(".") or d in (".",)]
-        # Skip if path contains ignored components
+                                                  
         rel_dir = os.path.relpath(dirpath, root_path)
         if rel_dir == ".":
             rel_dir = ""
-        # Add files
+                   
         for fn in filenames:
             if fn in (".env",):
                 continue
@@ -676,229 +678,9 @@ def print_recursive_listing():
     files = list_repo_files_recursive(".")
     output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
 
-# ---------------------------
-# Write to Edit Conversion
-# ---------------------------
-def maybe_convert_write_to_edit(plan: Dict[str, Any], user_text: str) -> Dict[str, Any]:
-    """Convert Write commands to Edit when user wants to change existing files."""
-    if not isinstance(plan, dict):
-        return plan
-    steps = plan.get("steps", [])
-    if not isinstance(steps, list):
-        return plan
-
-    change_verbs = {"change", "modify", "replace", "update", "edit"}
-    lower_user = user_text.lower()
-    intends_change = any(v in lower_user for v in change_verbs)
-
-    new_steps = []
-    for step in steps:
-        if not isinstance(step, dict):
-            new_steps.append(step)
-            continue
-        tool = step.get("tool", "").lower()
-        if tool == "write":
-            args = step.get("args", []) or []
-            kwargs = step.get("kwargs", {}) or {}
-            target = args[0] if len(args) >= 1 else None
-            new_content = args[1] if len(args) >= 2 else ""
-            force_flag = bool(kwargs.get("force", False))
-            if target and not force_flag and intends_change:
-                from pathlib import Path
-                p = Path(target)
-                if not p.is_absolute():
-                    p = Path.cwd() / p
-                if p.exists():
-                    read_res = dispatch_tool({"tool": "read", "args": [str(target)]})
-                    existing = ""
-                    if isinstance(read_res, dict) and read_res.get("success"):
-                        out = read_res.get("output", {})
-                        if isinstance(out, dict):
-                            existing = out.get("content", "")
-                        elif isinstance(out, str):
-                            existing = out
-                    else:
-                        try:
-                            with open(p, "r", encoding="utf-8", errors="replace") as f:
-                                existing = f.read()
-                        except Exception:
-                            existing = ""
-                    edit_step = {
-                        "tool": "Edit",
-                        "args": [str(target), existing, new_content, {"replace_all": False}],
-                        "kwargs": {}
-                    }
-                    new_steps.append(edit_step)
-                    continue
-        new_steps.append(step)
-    plan["steps"] = new_steps
-    return plan
-
-
-def inject_pre_delete_glob(plan: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure delete steps are preceded by a glob check for existence."""
-    if not isinstance(plan, dict):
-        return plan
-
-    steps = plan.get("steps")
-    if not isinstance(steps, list):
-        return plan
-
-    cwd = Path.cwd()
-    new_steps = []
-    for step in steps:
-        if isinstance(step, dict) and step.get("tool", "").lower() == "delete":
-            args = step.get("args", []) or []
-            target = args[0] if args else None
-            if isinstance(target, str):
-                # Attempt to resolve filename-only targets to an actual relative path
-                resolved_target = target
-                simple_name = target.strip().strip("./")
-                if simple_name and os.path.sep not in simple_name and not simple_name.startswith("..") and not any(ch in simple_name for ch in "*?["):
-                    matches = [str(path.relative_to(cwd)) for path in cwd.rglob(simple_name) if path.is_file() and path.name == simple_name]
-                    if matches:
-                        resolved_target = matches[0]
-                        step["args"] = [resolved_target] + list(args[1:])
-                        target = resolved_target
-
-                needs_insert = True
-                if new_steps:
-                    prev = new_steps[-1]
-                    if isinstance(prev, dict) and prev.get("tool", "").lower() == "glob":
-                        prev_args = prev.get("args", []) or []
-                        prev_target = prev_args[0] if prev_args else None
-                        if prev_target == target:
-                            needs_insert = False
-                if needs_insert:
-                    pattern = target
-                    if isinstance(target, str) and not any(ch in target for ch in "*?["):
-                        pattern = f"**/{target.strip().lstrip('./')}"
-                    new_steps.append({
-                        "tool": "glob",
-                        "args": [pattern],
-                        "kwargs": {"_delete_precheck": True}
-                    })
-        new_steps.append(step)
-
-    plan["steps"] = new_steps
-    return plan
-
-# ---------------------------
-def resolve_edit_entire_old_content(plan: Dict[str, Any], user_text: str) -> Dict[str, Any]:
-    """Replace placeholder edit args and support comment-out requests."""
-    if not isinstance(plan, dict):
-        return plan
-
-    steps = plan.get("steps")
-    if not isinstance(steps, list):
-        return plan
-
-    placeholders = {
-        "<entire-old-content>",
-        "<entire_old_content>",
-        "__entire_old_content__",
-        "<{entire-old-content}>",
-    }
-    placeholders_lower = {p.lower() for p in placeholders}
-    user_lower = (user_text or "").lower()
-    request_comment = any(phrase in user_lower for phrase in ("comment out", "comment the", "comment everything"))
-
-    def _comment_out(text: str) -> str:
-        if not text:
-            return text
-        lines = text.splitlines(True)
-        commented = []
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                commented.append(line)
-                continue
-            if stripped.startswith("#"):
-                commented.append(line)
-                continue
-            indent_len = len(line) - len(line.lstrip(" \t"))
-            prefix = line[:indent_len]
-            rest = line[indent_len:]
-            commented.append(f"{prefix}# {rest}")
-        # Preserve trailing newline behaviour
-        result = "".join(commented)
-        if not result.endswith("\n") and text.endswith("\n"):
-            result += "\n"
-        return result
-
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        if step.get("tool", "").lower() != "edit":
-            continue
-        args = step.get("args", [])
-        if not isinstance(args, list) or len(args) == 0:
-            continue
-        path = args[0]
-        old_value = args[1] if len(args) >= 2 else ""
-        if not isinstance(path, str) or not isinstance(old_value, str):
-            continue
-        if old_value.strip().lower() not in placeholders_lower:
-            continue
-
-        file_path = Path(path)
-        if not file_path.is_absolute():
-            file_path = Path.cwd() / file_path
-        try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            content = ""
-        new_value = args[2] if len(args) >= 3 and isinstance(args[2], str) else None
-        if request_comment:
-            new_content = _comment_out(content)
-        else:
-            new_content = new_value if new_value is not None else content
-
-        args[1] = content
-        if len(args) >= 3:
-            args[2] = new_content
-        else:
-            args.append(new_content)
-        step["args"] = args
-        kwargs = step.get("kwargs")
-        if not isinstance(kwargs, dict):
-            kwargs = {}
-        kwargs.setdefault("replace_all", True)
-        step["kwargs"] = kwargs
-
-    return plan
-
-
-# Plan Post-Processing Filters
-# ---------------------------
-def filter_invalid_read_steps(plan: Dict[str, Any]) -> Dict[str, Any]:
-    """Remove read steps that target non-existent files.
-
-    This prevents attempts to read files that aren't present (e.g., README.md when missing).
-    """
-    try:
-        steps = plan.get("steps", [])
-        filtered = []
-        for s in steps:
-            if not isinstance(s, dict):
-                filtered.append(s)
-                continue
-            tool = s.get("tool", "").lower()
-            args = s.get("args", []) or []
-            if tool == "read" and args:
-                target = args[0]
-                if isinstance(target, str) and not os.path.exists(target):
-                    # skip this read step
-                    continue
-            filtered.append(s)
-        plan["steps"] = filtered
-        return plan
-    except Exception:
-        return plan
-
-# ---------------------------
-# Main REPL
-# ---------------------------
+                             
+           
+                             
 def repl():
     deps = {
         "workspace_root": WORKSPACE_ROOT,
@@ -908,7 +690,6 @@ def repl():
         "faq_handlers": faq_handlers,
         "append_history": append_history,
         "list_repo_files_recursive": list_repo_files_recursive,
-        "maybe_convert_write_to_edit": maybe_convert_write_to_edit,
         "generate_plan": generate_plan,
         "destructive_tools": DESTRUCTIVE_TOOLS,
         "ensure_client": _ensure_client,
@@ -919,7 +700,7 @@ def main():
     """Main entry point with command line argument support."""
     import sys
     
-    # Handle command line arguments
+                                   
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
         if arg in ("--version", "-v", "version"):
@@ -944,7 +725,7 @@ def main():
                 output.print_info("CodeGen-CLI - Universal Coding Agent", title="Help")
             return
         elif arg in ("--set-key", "set-key"):
-            # Accept key from argv or prompt interactively
+                                                          
             key = None
             if len(sys.argv) >= 3 and sys.argv[2]:
                 key = sys.argv[2]
@@ -964,7 +745,7 @@ def main():
                 with cfg_file.open("w", encoding="utf-8") as f:
                     f.write(f"GEMINI_API_KEY={key}\n")
                 output.print_success(f"Saved API key to {cfg_file}", title="Setup")
-                # Update current process env and client
+                                                       
                 os.environ["GEMINI_API_KEY"] = key
                 global API_KEY
                 API_KEY = key
@@ -978,7 +759,7 @@ def main():
             output.print_info("Use 'codegen --help' for usage information", title="CLI")
             return
     
-    # Start the REPL
+                    
     repl()
 
 if __name__ == "__main__":

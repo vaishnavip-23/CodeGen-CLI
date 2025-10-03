@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Delete tool for removing files and directories.
+
 """Delete tool with glob discovery and confirmation safeguards."""
 
 from __future__ import annotations
@@ -49,10 +51,10 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Dictionary with success status and result
     """
-    # Allow dispatcher to pass a suggested path for confirmation
+                                                                
     suggested = kwargs.pop("suggested_path", None)
 
-    # Validate path
+                   
     if (not path or not isinstance(path, str)) and not suggested:
         return {
             "tool": "delete",
@@ -62,7 +64,7 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
             "kwargs": kwargs
         }
 
-    # If no explicit path but a suggestion exists, ask for confirmation interactively
+                                                                                     
     if (not path or not isinstance(path, str)) and suggested:
         try:
             ans = input(f"Did you mean to delete '{suggested}'? (y/n) ").strip().lower()
@@ -72,7 +74,7 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
             return {"tool": "delete", "success": False, "output": "Deletion cancelled.", "args": [suggested], "kwargs": {}}
         path = suggested
     
-    # Check if path is safe
+                           
     if not is_safe_path(path):
         return {
             "tool": "delete",
@@ -125,7 +127,7 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
             skipped.append(f"Permission denied: {rel}")
         except OSError as exc:
             skipped.append(f"OS error for {rel}: {exc}")
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:                                
             skipped.append(f"Unexpected error for {rel}: {exc}")
 
     if deleted:

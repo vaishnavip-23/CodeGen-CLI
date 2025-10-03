@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Edit tool for modifying existing files.
+
 """Edit tool - modifies existing files safely within the workspace.
 
 Now includes optional Python syntax checking after edits.
@@ -14,14 +16,14 @@ def _check_python_syntax(file_path: str) -> dict:
     try:
         py_compile.compile(file_path, doraise=True)
         return {"checked": True, "ok": True}
-    except py_compile.PyCompileError as exc:  # pragma: no cover - depends on dynamic content
+    except py_compile.PyCompileError as exc:                                                 
         return {
             "checked": True,
             "ok": False,
             "error": str(exc),
             "details": exc.msg if hasattr(exc, "msg") else None,
         }
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:                                
         return {
             "checked": True,
             "ok": False,
@@ -72,7 +74,7 @@ def call(path: str, *args, **kwargs) -> dict:
         with open(full_path, "r", encoding="utf-8", errors="replace") as file:
             original_content = file.read()
         
-        # Special case: if old_string is empty string, treat as overwrite with new_string
+                                                                                         
         if isinstance(old_string, str) and old_string == "":
             with open(full_path, "w", encoding="utf-8") as file:
                 file.write(new_string)
@@ -92,7 +94,7 @@ def call(path: str, *args, **kwargs) -> dict:
 
         if old_string not in original_content:
             if smart and isinstance(old_string, str):
-                # Build a forgiving regex that ignores case and allows punctuation/space between words
+                                                                                                      
                 words = [w for w in re.split(r"\s+", old_string.strip()) if w]
                 if words:
                     pattern = r"\b" + r"\W+".join(re.escape(w) for w in words) + r"\b"

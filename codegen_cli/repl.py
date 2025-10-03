@@ -1,3 +1,5 @@
+# File Summary: Interactive REPL loop that parses input and executes plans.
+
 """
 REPL loop for CodeGen CLI.
 
@@ -74,7 +76,7 @@ def _prompt_user_input_box(output_module) -> str:
 
     wrapped_input = textwrap.wrap(user_line, inner) or [""]
 
-    # Move cursor up one line to rewrite the placeholder
+                                                        
     sys.stdout.write("\x1b[1A")
     for idx, segment in enumerate(wrapped_input):
         if idx > 0:
@@ -203,12 +205,22 @@ def _print_recursive_listing(list_repo_files_recursive, output):
 
 def _should_route_to_summary(user_text: str) -> bool:
     lowered = user_text.lower().strip()
+
+    def _looks_like_path(text: str) -> bool:
+        if "/" in text or "\\" in text:
+            return True
+        import re as _re
+        return bool(_re.search(r"\b\w+\.(py|js|ts|tsx|json|md|txt|yaml|yml|ini|cfg)\b", text))
+
     if any(phrase in lowered for phrase in SUMMARY_TRIGGER_PHRASES):
         return True
-    if lowered.startswith("summarize"):
-        return True
-    if "summarize" in lowered and any(keyword in lowered for keyword in ("repo", "repository", "project", "codebase", "code", "files")):
-        return True
+
+    if "summarize" in lowered:
+        if _looks_like_path(lowered):
+            return False
+        if any(keyword in lowered for keyword in ("repo", "repository", "project", "codebase", "overview")):
+            return True
+
     return False
 
 
@@ -223,7 +235,6 @@ def run_repl(deps: Dict[str, Any]) -> None:
       - faq_handlers: module with handle_small_talk(user_text, append_history)
       - append_history: callable(user_text, agent_plan, results)
       - list_repo_files_recursive: callable
-      - maybe_convert_write_to_edit: callable
       - generate_plan: callable
       - destructive_tools: set[str]
       - ensure_client: callable -> client or None
@@ -235,7 +246,6 @@ def run_repl(deps: Dict[str, Any]) -> None:
     faq_handlers = deps["faq_handlers"]
     append_history = deps["append_history"]
     list_repo_files_recursive = deps["list_repo_files_recursive"]
-    maybe_convert_write_to_edit = deps["maybe_convert_write_to_edit"]
     generate_plan = deps["generate_plan"]
     destructive_tools = deps["destructive_tools"]
     ensure_client = deps["ensure_client"]
@@ -308,7 +318,7 @@ def run_repl(deps: Dict[str, Any]) -> None:
             append_history(user_text, {"tool": "python_run"}, [])
             continue
 
-        # Shortcut: common summaries/explanations -> Task tool directly (no LLM)
+                                                                                
         if _should_route_to_summary(user_text):
             task_plan = {"steps": [{"tool": "task", "args": ["summarize repo", user_text, "general-purpose"], "kwargs": {}}]}
             results = dispatch_tool(task_plan)
@@ -317,10 +327,10 @@ def run_repl(deps: Dict[str, Any]) -> None:
             append_history(user_text, task_plan, results if isinstance(results, list) else [results])
             continue
 
-        # Inline code explanation: detect fenced code blocks and summarize without LLM
+                                                                                      
         if "```" in user_text:
             try:
-                # Extract code between first pair of fences
+                                                           
                 parts = user_text.split("```")
                 code_text = parts[1] if len(parts) >= 3 else ""
                 if code_text.strip():
@@ -379,18 +389,7 @@ def run_repl(deps: Dict[str, Any]) -> None:
             output.print_warning("Running non-destructive steps only (destructive skipped).", title="Plan")
 
         plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
-        plan_for_dispatch = maybe_convert_write_to_edit(plan_for_dispatch, user_text)
-        from .main import (
-            filter_invalid_read_steps,
-            inject_pre_delete_glob,
-            resolve_edit_entire_old_content,
-        )  # local import to avoid cycle at module load
-        plan_for_dispatch = resolve_edit_entire_old_content(plan_for_dispatch, user_text)
-        plan_for_dispatch = inject_pre_delete_glob(plan_for_dispatch)
-        plan_for_dispatch = filter_invalid_read_steps(plan_for_dispatch)
-
-        to_dispatch = {"steps": plan_for_dispatch.get("steps", [])}
-        results = dispatch_tool(to_dispatch)
+        results = dispatch_tool(plan_for_dispatch)
 
         if isinstance(results, list):
             for r in results:
@@ -403,5 +402,3 @@ def run_repl(deps: Dict[str, Any]) -> None:
             output.print_tool_result(tool_name, results)
 
         append_history(user_text, plan, results if isinstance(results, list) else [results])
-
-

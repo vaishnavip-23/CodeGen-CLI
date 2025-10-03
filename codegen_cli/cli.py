@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# File Summary: Command line entry point that delegates to the main application.
+
 """
 CodeGen-CLI - Universal Coding Agent
 

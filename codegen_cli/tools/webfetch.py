@@ -1,3 +1,5 @@
+# File Summary: Implementation of the WebFetch tool for retrieving web pages.
+
 """
 Web Fetch Tool for CodeGen-CLI
 
@@ -21,37 +23,37 @@ def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
         Dictionary with title, text, and url
     """
     try:
-        # Prepare request headers
+                                 
         headers = {
             "User-Agent": "CodeGen-CLI-Agent/1.0"
         }
         
-        # Make request
+                      
         response = requests.get(url, timeout=10, headers=headers)
         response.raise_for_status()
         
-        # Parse HTML content
+                            
         soup = BeautifulSoup(response.text, "html.parser")
         
-        # Extract title
+                       
         title = ""
         if soup.title and soup.title.string:
             title = soup.title.string.strip()
         
-        # Extract text content from paragraphs
+                                              
         paragraphs = []
         for p in soup.find_all("p"):
             text = p.get_text(separator=" ", strip=True)
-            if text:  # Only add non-empty paragraphs
+            if text:                                 
                 paragraphs.append(text)
         
-        # Join paragraphs or fall back to all text
+                                                  
         if paragraphs:
             text = "\n\n".join(paragraphs)
         else:
             text = soup.get_text(separator=" ", strip=True)
         
-        # Truncate if too long
+                              
         if len(text) > max_chars:
             text = text[:max_chars] + "\n\n[Content truncated]"
         
@@ -80,9 +82,9 @@ def call(url: str, *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Dictionary with success status and content
     """
-    # Extract parameters from kwargs
+                                    
     max_chars = kwargs.get("max_chars", 20000)
-    # Validate inputs
+                     
     if not url or not url.strip():
         return {
             "tool": "webfetch",
@@ -97,13 +99,13 @@ def call(url: str, *args, **kwargs) -> Dict[str, Any]:
             "output": "Max characters must be between 100 and 100000."
         }
     
-    # Validate URL format
+                         
     url = url.strip()
     if not (url.startswith("http://") or url.startswith("https://")):
         url = "https://" + url
     
     try:
-        # Fetch content
+                       
         content = fetch_web_content(url, max_chars)
         
         return {

@@ -1,3 +1,5 @@
+# File Summary: Console rendering helpers for styled and boxed output.
+
 """
 Output formatting utilities for CodeGen2 CLI agent.
 
@@ -19,7 +21,7 @@ def _supports_color() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
     try:
-        return sys.stdout.isatty()  # type: ignore[attr-defined]
+        return sys.stdout.isatty()                              
     except Exception:
         return False
 
@@ -152,9 +154,9 @@ def _print_panel(title: str, content: str, style: str = "info") -> None:
     print()
     print(_render_panel(title, lines, style=style))
 
-# ---------------------------
-# Main Output Functions
-# ---------------------------
+                             
+                       
+                             
 def print_user_input(text: str):
     """Display user input in a styled panel."""
     _print_panel("User", text, style="input")
@@ -206,7 +208,7 @@ def print_help(project_info=None):
     if project_info is None:
         project_info = {"language": "unknown", "package_manager": None}
     
-    # Language-specific help
+                            
     language_help = {
         'python': {
             'description': 'Python project with support for pip, poetry, and pipenv',
@@ -297,16 +299,16 @@ This ensures deliberate and predictable actions across any codebase."""
     
     print_boxed("CodeGen CLI - Universal Coding Agent", help_text)
 
-# ---------------------------
-# Code Syntax Highlighting
-# ---------------------------
+                             
+                          
+                             
 def _colorize_python_code(line: str) -> str:
     """Apply simple syntax highlighting to Python code."""
-    # Keywords
+              
     line = re.sub(r'\b(def|class|import|from|return|if|else|elif|for|while|with|try|except|finally|and|or|not|in|is|as|assert|del|global|nonlocal|lambda|pass|raise|yield|True|False|None)\b', f'{Color.KEYWORD}\\1{Color.CODE}', line)
-    # Strings
+             
     line = re.sub(r'(\'\'\'.*?\'\'\'|\"\"\".*?\"\"\"|\'.*?\'|\".*?\")', f'{Color.STRING}\\1{Color.CODE}', line)
-    # Comments
+              
     line = re.sub(r'(#.*)', f'{Color.COMMENT}\\1{Color.CODE}', line)
     return line
 
@@ -326,9 +328,9 @@ def _format_code_content(content: str, language: str = "python") -> str:
             numbered_lines.append(f"{Color.LINENO}{i:3} |{Color.RESET} {line}")
         return '\n'.join(numbered_lines)
 
-# ---------------------------
-# Tool Result Display
-# ---------------------------
+                             
+                     
+                             
 def _task_summary_lines(output_data: Dict[str, Any]) -> List[str]:
     """Build formatted summary lines for the Task tool."""
     if not isinstance(output_data, dict):
@@ -428,6 +430,6 @@ def print_tool_result(tool_name: str, result: Dict[str, Any]):
     body = "\n\n".join(block for block in content_blocks if block)
     print_boxed(title, body if body else status_line, style=style)
 
-# ---------------------------
-# Legacy Function Names (for compatibility)
-# ---------------------------
+                             
+                                           
+                             

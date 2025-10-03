@@ -1,3 +1,5 @@
+# File Summary: Implementation of the python_run tool to execute scripts.
+
 """Python execution tool for CodeGen CLI.
 
 Allows running Python scripts within the workspace while providing
@@ -124,7 +126,7 @@ def call(
             "success": False,
             "output": f"Python executable not found: {python_executable}",
         }
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:                                
         return {
             "tool": "python_run",
             "success": False,

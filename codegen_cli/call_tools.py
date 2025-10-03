@@ -1,3 +1,5 @@
+# File Summary: Tool dispatcher that loads modules and routes tool invocations.
+
 """
 Tool dispatcher for CodeGen2 CLI agent.
 
@@ -24,7 +26,7 @@ def _call_module_func_safe(module, args, kwargs):
     """Safely call module.call with various argument patterns."""
     last_exc = None
     
-    # Try different calling patterns
+                                    
     patterns = [
         lambda: module.call(*args, **(kwargs or {})),
         lambda: module.call(*args),
@@ -41,7 +43,7 @@ def _call_module_func_safe(module, args, kwargs):
         except TypeError as e:
             last_exc = e
         except Exception:
-            # Runtime errors should propagate
+                                             
             raise
     
     if last_exc:
@@ -53,7 +55,7 @@ def _execute_tool_call(tool_name: str, args, kwargs):
     module = _load_tool_module(tool_name)
     args = _normalize_args(tool_name, args, kwargs)
 
-    # Special handling for read tool
+                                    
     if tool_name.lower() == "read":
         result = _call_module_func_safe(module, args, kwargs)
         if result and isinstance(result, dict) and not result.get("success", True):
@@ -145,7 +147,7 @@ def _extract_args_kwargs_from_use(tool_name: str, use: Dict[str, Any]) -> Tuple[
     if "kwargs" in use and isinstance(use["kwargs"], dict):
         kwargs = dict(use["kwargs"])
 
-    # Convert commonly used keyword names to positional arguments for our tools
+                                                                               
     lowered = tool_name.lower()
     def _pop_first(keys):
         for key in keys:
@@ -239,16 +241,16 @@ def _glob_retry_read(module, args, kwargs):
     if not isinstance(target_path, str):
         return None
     
-    # Try glob to find the file
+                               
     try:
         glob_module = importlib.import_module("codegen_cli.tools.glob")
         glob_result = glob_module.call(f"**/{target_path}")
 
         if isinstance(glob_result, dict) and glob_result.get("success"):
             output = glob_result.get("output")
-            # Our Glob tool returns a list of relative paths in 'output'
+                                                                        
             if isinstance(output, list) and output:
-                # Retry read with first match
+                                             
                 new_args = [output[0]] + list(args[1:])
                 return _call_module_func_safe(module, new_args, kwargs)
     except Exception:
@@ -265,7 +267,7 @@ def _check_write_safety(args, kwargs):
     if not isinstance(target_path, str):
         return True, None
     
-    # Check if file exists
+                          
     try:
         import os
         if os.path.exists(target_path):
@@ -300,7 +302,7 @@ def _normalize_args(tool_name: str, args, kwargs):
     tokens = [str(a) for a in args]
     cleaned = [t.strip().strip(",.!") for t in tokens if t.strip()]
 
-    # Helper: pick first path-like candidate
+                                            
     def pick_path(cands):
         for c in cands:
             if _looks_like_path(c):
@@ -315,7 +317,7 @@ def _normalize_args(tool_name: str, args, kwargs):
         path = pick_path(candidates)
         if path:
             return [path] + ([] if name in ("delete", "read") else cleaned[1:])
-        # If delete and no direct path, attempt a filesystem search for likely file
+                                                                                   
         if name == "delete":
             found = None
             tokens = [c.lower() for c in candidates if c]
@@ -338,25 +340,25 @@ def _normalize_args(tool_name: str, args, kwargs):
         candidates = [c for c in cleaned if c.lower() not in stopwords]
         path = pick_path(candidates)
         if path:
-            # content = remaining tokens excluding path and stop/linker words
+                                                                             
             remaining = [c for c in candidates if c != path and c.lower() not in linkers]
             content = " ".join(remaining).strip()
             return [path] + ([content] if content else [])
         return args
 
     if name == "edit":
-        # Preserve original args to avoid losing empty strings ("" used to signal overwrite)
+                                                                                            
         return args
 
     if name == "grep" and cleaned:
-        # Pattern [in PATH]
+                           
         if "in" in [c.lower() for c in cleaned]:
             idx = [c.lower() for c in cleaned].index("in")
             pattern = " ".join(cleaned[:idx]).strip()
             after = cleaned[idx+1:]
             path = pick_path([c for c in after if c.lower() not in stopwords])
             if pattern and path:
-                # our grep tool expects pattern first; path passed via kwargs in our dispatcher
+                                                                                               
                 if isinstance(kwargs, dict):
                     kwargs.setdefault("path", path)
                 return [pattern]
@@ -377,7 +379,7 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
     if not isinstance(plan, dict):
         return {"tool": "unknown", "success": False, "output": "Invalid plan format", "args": [], "kwargs": {}}
     
-    # Support both {tool, args, kwargs} and {steps: [...]} formats
+                                                                  
     if "tool" in plan and isinstance(plan.get("tool"), str):
         step = {
             "tool": plan.get("tool"),
@@ -396,7 +398,7 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
         return {"tool": plan.get("tool", "unknown"), "success": True, "output": "No steps to execute", "args": plan.get("args", []), "kwargs": plan.get("kwargs", {})}
     
     if len(steps) == 1:
-        # Single step
+                     
         step = steps[0]
         if not isinstance(step, dict):
             return {"tool": "unknown", "success": False, "output": "Step must be a dictionary", "args": [], "kwargs": {}}
@@ -420,7 +422,7 @@ def dispatch_tool(plan: Dict[str, Any]) -> Any:
             }
     
     else:
-        # Multiple steps
+                        
         results = []
         for step in steps:
             if not isinstance(step, dict):

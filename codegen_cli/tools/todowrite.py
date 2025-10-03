@@ -1,3 +1,5 @@
+# File Summary: Implementation of the TodoWrite tool for managing task lists.
+
 """
 Todo Management Tool for CodeGen-CLI
 
@@ -10,13 +12,13 @@ from pathlib import Path
 import json
 from typing import List, Dict, Any
 
-# Resolve persistent storage location (user config by default)
+                                                              
 def _resolve_db_paths():
     env_override = os.environ.get("CODEGEN_TODOS_PATH")
     if env_override:
         p = Path(env_override)
         return p.parent, p
-    # Always use user config dir by default
+                                           
     db_dir = Path.home() / ".config" / "codegen"
     db_file = db_dir / "todos.json"
     return db_dir, db_file
@@ -30,11 +32,11 @@ def ensure_database():
     Ensure the database directory and file exist.
     Creates them if they don't exist.
     """
-    # Create database directory if it doesn't exist
+                                                   
     if not os.path.exists(DB_DIR):
         os.makedirs(DB_DIR, exist_ok=True)
     
-    # Create empty todos file if it doesn't exist
+                                                 
     if not os.path.exists(DB_FILE):
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump([], f)
@@ -51,7 +53,7 @@ def read_todos() -> List[Dict[str, Any]]:
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
-        # If file is corrupted or missing, return empty list
+                                                            
         return []
 
 def write_todos(todos: List[Dict[str, Any]]):
@@ -144,13 +146,13 @@ def clear_todos() -> Dict[str, Any]:
     """
     write_todos([])
     
-    # Delete the database folder to prevent todo confusion between tasks
+                                                                        
     try:
         import shutil
         if os.path.exists(DB_DIR):
             shutil.rmtree(DB_DIR)
     except Exception as e:
-        # If deletion fails, continue - the important part is todos are cleared
+                                                                               
         pass
     
     return {
@@ -197,7 +199,7 @@ def _merge_by_id(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]])
         if not _is_todo_item(it):
             continue
         by_id[it["id"]] = it
-    # Preserve stable order by sorting by id (string-safe)
+                                                          
     try:
         return sorted(by_id.values(), key=lambda x: str(x.get("id")))
     except Exception:
@@ -215,8 +217,8 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Result dictionary
     """
-    # Support system-prompt style: TodoWrite(todos_array) or TodoWrite({merge:bool, todos:[...]})
-    # Case 1: action itself was passed as the todos array (dispatcher passes positional only)
+                                                                                                 
+                                                                                             
     if isinstance(action, list):
         todos_arg = action
         merge = False
@@ -228,7 +230,7 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
             return _write_full_list(updated)
         return _write_full_list(todos_arg)
 
-    # If the first positional arg is a list, treat it as the full todos list to write (direct calls)
+                                                                                                    
     if args and isinstance(args[0], list):
         todos_arg = args[0]
         merge = False
@@ -240,7 +242,7 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
             return _write_full_list(updated)
         return _write_full_list(todos_arg)
 
-    # If the first positional arg is a dict with {todos:[...], merge?:bool}
+                                                                           
     if args and isinstance(args[0], dict):
         obj = args[0]
         todos_arg = obj.get("todos")
@@ -251,7 +253,7 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
                 return _write_full_list(updated)
             return _write_full_list(todos_arg)
 
-    # Fallback to legacy subcommand interface (add, list, pop, clear)
+                                                                     
     action = action or "list"
     
     if action == "add":

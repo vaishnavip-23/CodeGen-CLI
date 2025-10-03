@@ -1,3 +1,5 @@
+# File Summary: Implementation of the LS tool for directory listings.
+
 """
 List files tool - lists files and directories with filtering options.
 """

@@ -1,3 +1,5 @@
+# File Summary: Implementation of the Bash tool for executing shell commands safely.
+
 """
 Bash tool - executes shell commands safely with security restrictions.
 """
@@ -45,7 +47,7 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
             "output": "No command provided"
         }
     
-    # Check if command is allowed
+                                 
     allowed, reason = is_command_allowed(command_parts)
     if not allowed:
         return {
@@ -55,7 +57,7 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
         }
     
     try:
-        # Execute command
+                         
         result = subprocess.run(
             command_parts,
             capture_output=True,
