@@ -1,9 +1,34 @@
-"""
-Edit tool - modifies existing files by replacing text safely within workspace.
+"""Edit tool - modifies existing files safely within the workspace.
+
+Now includes optional Python syntax checking after edits.
 """
 
 import os
+import py_compile
 import re
+import traceback
+
+def _check_python_syntax(file_path: str) -> dict:
+    if not file_path.endswith(".py"):
+        return {"checked": False}
+    try:
+        py_compile.compile(file_path, doraise=True)
+        return {"checked": True, "ok": True}
+    except py_compile.PyCompileError as exc:  # pragma: no cover - depends on dynamic content
+        return {
+            "checked": True,
+            "ok": False,
+            "error": str(exc),
+            "details": exc.msg if hasattr(exc, "msg") else None,
+        }
+    except Exception as exc:  # pragma: no cover - defensive
+        return {
+            "checked": True,
+            "ok": False,
+            "error": f"Unexpected compile error: {exc}",
+            "traceback": traceback.format_exc(),
+        }
+
 
 WORKSPACE = os.getcwd()
 
@@ -22,6 +47,7 @@ def call(path: str, *args, **kwargs) -> dict:
     new_string = args[1] if len(args) > 1 else kwargs.get("new_string")
     replace_all = kwargs.get("replace_all", False)
     smart = kwargs.get("smart", True)
+    skip_check = kwargs.get("skip_python_check", False)
     
     if not is_safe_path(path):
         return {
@@ -51,9 +77,17 @@ def call(path: str, *args, **kwargs) -> dict:
             with open(full_path, "w", encoding="utf-8") as file:
                 file.write(new_string)
             rel_path = os.path.relpath(full_path, WORKSPACE)
+            report = _check_python_syntax(full_path) if not skip_check else {"checked": False}
+            if report.get("checked") and not report.get("ok", True):
+                return {
+                    "success": False,
+                    "output": f"Edited {rel_path}, but syntax errors detected.",
+                    "errors": report,
+                }
             return {
                 "success": True,
-                "output": f"Edited {rel_path}"
+                "output": f"Edited {rel_path}",
+                "python_check": report if report.get("checked") else None,
             }
 
         if old_string not in original_content:
@@ -86,9 +120,17 @@ def call(path: str, *args, **kwargs) -> dict:
             file.write(new_content)
         
         rel_path = os.path.relpath(full_path, WORKSPACE)
+        report = _check_python_syntax(full_path) if not skip_check else {"checked": False}
+        if report.get("checked") and not report.get("ok", True):
+            return {
+                "success": False,
+                "output": f"Edited {rel_path}, but syntax errors detected.",
+                "errors": report,
+            }
         return {
-            "success": True, 
-            "output": f"Edited {rel_path}"
+            "success": True,
+            "output": f"Edited {rel_path}",
+            "python_check": report if report.get("checked") else None,
         }
         
     except Exception as e:

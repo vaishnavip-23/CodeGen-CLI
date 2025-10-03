@@ -1,17 +1,24 @@
-"""
-Delete Tool for CodeGen-CLI
+"""Delete tool with glob discovery and confirmation safeguards."""
 
-This tool safely deletes files and directories within the workspace.
-It includes safety checks to prevent accidental deletion outside the workspace.
-"""
+from __future__ import annotations
 
 import os
 import shutil
-from typing import Dict, Any
 from pathlib import Path
+from typing import Dict, Any, List
 
-# Get workspace path
-WORKSPACE = os.getcwd()
+WORKSPACE = Path(os.getcwd())
+
+
+def _paths_for_pattern(pattern: str) -> List[Path]:
+    candidate = WORKSPACE / pattern
+    if candidate.exists():
+        return [candidate]
+
+    glob_pattern = pattern
+    if not any(ch in pattern for ch in "*?[]"):
+        glob_pattern = f"**/{pattern}"
+    return list(WORKSPACE.glob(glob_pattern))
 
 def is_safe_path(path: str) -> bool:
     """
@@ -24,11 +31,8 @@ def is_safe_path(path: str) -> bool:
         True if safe, False otherwise
     """
     try:
-        # Convert to absolute path
         abs_path = os.path.abspath(path)
-        abs_workspace = os.path.abspath(WORKSPACE)
-        
-        # Check if path is within workspace
+        abs_workspace = str(WORKSPACE)
         return abs_path.startswith(abs_workspace)
     except Exception:
         return False
@@ -78,62 +82,65 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
             "kwargs": kwargs
         }
     
-    # Check if path exists
-    if not os.path.exists(path):
+    matches = _paths_for_pattern(path)
+    if not matches:
         return {
             "tool": "delete",
             "success": False,
-            "output": f"Path '{path}' does not exist.",
+            "output": f"No matches found for '{path}'.",
             "args": [path],
-            "kwargs": kwargs
+            "kwargs": kwargs,
         }
-    
-    try:
-        # Delete file or directory
-        if os.path.isfile(path):
-            os.remove(path)
-            result_msg = f"Deleted file: {path}"
-        elif os.path.isdir(path):
-            shutil.rmtree(path)
-            result_msg = f"Deleted directory: {path}"
+
+    confirmations = []
+    deleted = []
+    skipped = []
+    auto_confirm = os.environ.get("CODEGEN_AUTO_CONFIRM") == "1"
+
+    for match in matches:
+        rel = match.relative_to(WORKSPACE)
+        if not auto_confirm:
+            try:
+                ans = input(f"Delete '{rel}'? (y/n) ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                ans = "n"
         else:
-            return {
-                "tool": "delete",
-                "success": False,
-                "output": f"Path '{path}' is neither a file nor directory.",
-                "args": [path],
-                "kwargs": kwargs
-            }
-        
+            ans = "y"
+        confirmations.append({"path": str(rel), "answer": ans})
+        if ans not in ("y", "yes"):
+            skipped.append(str(rel))
+            continue
+
+        target = match
+        try:
+            if target.is_file():
+                target.unlink()
+                deleted.append(f"Deleted file: {rel}")
+            elif target.is_dir():
+                shutil.rmtree(target)
+                deleted.append(f"Deleted directory: {rel}")
+            else:
+                skipped.append(str(rel))
+        except PermissionError:
+            skipped.append(f"Permission denied: {rel}")
+        except OSError as exc:
+            skipped.append(f"OS error for {rel}: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive
+            skipped.append(f"Unexpected error for {rel}: {exc}")
+
+    if deleted:
         return {
             "tool": "delete",
             "success": True,
-            "output": result_msg,
-            "args": [path],
-            "kwargs": kwargs
+            "output": "\n".join(deleted),
+            "confirmations": confirmations,
+            "skipped": skipped,
         }
-        
-    except PermissionError:
-        return {
-            "tool": "delete",
-            "success": False,
-            "output": f"Permission denied: Cannot delete '{path}'",
-            "args": [path],
-            "kwargs": kwargs
-        }
-    except OSError as e:
-        return {
-            "tool": "delete",
-            "success": False,
-            "output": f"OS error: {e}",
-            "args": [path],
-            "kwargs": kwargs
-        }
-    except Exception as e:
-        return {
-            "tool": "delete",
-            "success": False,
-            "output": f"Unexpected error: {e}",
-            "args": [path],
-            "kwargs": kwargs
-        }
+
+    return {
+        "tool": "delete",
+        "success": False,
+        "output": "Deletion cancelled." if skipped else "No deletions performed.",
+        "confirmations": confirmations,
+        "skipped": skipped,
+    }
