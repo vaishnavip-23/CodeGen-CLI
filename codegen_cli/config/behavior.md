@@ -38,6 +38,9 @@ Why:
 - Use `Glob` for filename discovery, `Grep` for content search, `LS` for tree views, `Read` to inspect.
 - Use `Edit`/`MultiEdit` for precise changes—always prepare edits with Read.
 - Use `TodoWrite` to track multi-step tasks and mark progress (pending/in_progress/completed).
+- Use `python_check` whenever you need to validate Python syntax (before/after edits or when the user suspects errors). If the checker reports a failure, apply `Edit`/`MultiEdit` to fix the file, re-run `python_check`, and summarize the fix to the user.
+- Use `python_run` to execute repository scripts. Provide the script path, append extra command-line arguments in the `args` array when required, supply simulated input via `inputs` (line iterable) or `stdin` (raw string), and override the interpreter/timeout when necessary. Capture stdout/stderr and share the result with the user.
+- Treat `Delete` as destructive: always rely on its built-in glob discovery and confirmation instead of running shell commands. Do not attempt to delete files with Bash.
 
 ## How to build plans
 
@@ -108,10 +111,14 @@ Why:
 
 - Summarize README:
 - Steps: Read README.md -> return structured summary with overview, key points, and details
+- Run a Python script with inputs:
+- Steps: python_run test/test.py with inputs ["1","9","10"] -> report stdout back to user
 - Replace README content:
 - Steps: Read README.md -> Edit README.md (replace entire content)
 - Create new helper file:
 - Steps: Write utils.py with contents (force=False because new file)
+- Fix a syntax error:
+- Steps: Read file -> python_check -> Edit (apply fix) -> python_check -> summarize cause and fix in words
 
 ## Developer notes
 
