@@ -5,9 +5,9 @@ Handles calling individual tool modules and provides safety checks for file oper
 """
 
 import importlib
+import os
 import traceback
 from typing import Any, Dict, List, Tuple
-import os
 
 def _load_tool_module(name: str):
     """Load a tool module by name."""
@@ -230,14 +230,6 @@ def _execute_parallel_tool(step: Dict[str, Any]):
         "kwargs": {},
     }
 
-def _read_file_safe(path: str) -> str:
-    """Safely read file content."""
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
-    except Exception:
-        return ""
-
 def _glob_retry_read(module, args, kwargs):
     """Try to find file using glob and retry read."""
     if not args:
@@ -325,7 +317,6 @@ def _normalize_args(tool_name: str, args, kwargs):
             return [path] + ([] if name in ("delete", "read") else cleaned[1:])
         # If delete and no direct path, attempt a filesystem search for likely file
         if name == "delete":
-            import os
             found = None
             tokens = [c.lower() for c in candidates if c]
             for dirpath, dirnames, filenames in os.walk(os.getcwd()):
