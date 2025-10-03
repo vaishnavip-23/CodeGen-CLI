@@ -5,7 +5,121 @@ This module contains the interactive loop and related helpers, keeping
 `main.py` focused on configuration and orchestration.
 """
 
+
+import re
+import shutil
+import sys
+import textwrap
 from typing import Any, Dict
+
+SUMMARY_TRIGGER_PHRASES = (
+    "summarize the repo",
+    "summarize repository",
+    "summarize project",
+    "summarize the entire repo",
+    "summarize codebase",
+    "summarize the codebase",
+    "analyze repo",
+    "analyze repository",
+    "explain the codebase",
+    "explain the repo",
+    "explain project",
+    "what does it do",
+    "describe the repo",
+    "describe the codebase",
+    "overview of the repo",
+    "overview of the codebase",
+)
+
+
+def _prompt_user_input_box(output_module) -> str:
+    color = output_module.Color
+    border = color.BORDER
+    reset = color.RESET
+    title = "Prompt"
+    term_width = shutil.get_terminal_size(fallback=(80, 24)).columns
+    target_width = output_module._current_box_width()
+    width = max(40, min(term_width - 2, target_width))
+    inner = width - 4
+    top = f"{border}╭{'─' * (width - 2)}╮{reset}"
+    header = title.upper().center(inner)
+    header_line = f"{border}│{reset} {color.TITLE}{header}{reset} {border}│{reset}"
+    bottom = f"{border}╰{'─' * (width - 2)}╯{reset}"
+
+    print()
+    print(top)
+    print(header_line)
+    instructions = [
+        "Type your instruction and press Enter.",
+        "Natural language requests are welcome; commands are optional."
+    ]
+    instruction_blocks = []
+    for line in instructions:
+        wrapped = textwrap.wrap(line, inner) or [""]
+        instruction_blocks.append(wrapped)
+        for segment in wrapped:
+            print(f"{border}│{reset} {color.TEXT}{segment.ljust(inner)}{reset} {border}│{reset}")
+
+    print(f"{border}│{reset} {' ' * inner} {border}│{reset}")
+    prompt_prefix = f"{border}│{reset} "
+
+    sys.stdout.write(prompt_prefix)
+    sys.stdout.flush()
+
+    raw = sys.stdin.readline()
+    if raw == "":
+        print(bottom)
+        raise EOFError
+    user_line = raw.rstrip("\n")
+
+    wrapped_input = textwrap.wrap(user_line, inner) or [""]
+
+    # Move cursor up one line to rewrite the placeholder
+    sys.stdout.write("\x1b[1A")
+    for idx, segment in enumerate(wrapped_input):
+        if idx > 0:
+            sys.stdout.write(f"{border}│{reset} {' ' * inner} {border}│{reset}\n")
+        line_content = f"{border}│{reset} {color.TEXT}{segment.ljust(inner)}{reset} {border}│{reset}"
+        sys.stdout.write("\r\x1b[2K" + line_content + "\n")
+    print(bottom)
+    return user_line
+
+
+def _try_direct_python_run(user_text: str, dispatch_tool, output_module) -> bool:
+    match = re.search(r"run\s+([^\s]+)\s+(?:with\s+inputs?\s+)?(.+)", user_text, re.IGNORECASE)
+    if not match:
+        return False
+
+    script = match.group(1).strip()
+    input_section = match.group(2).strip()
+
+    input_section = re.split(r"\b(?:and then|and)\b|\.", input_section, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+
+    tokens = [tok.strip() for tok in re.split(r",|\s+", input_section) if tok.strip()]
+    numeric_pattern = re.compile(r"[-+]?\d*\.?\d+")
+    numeric_tokens = [tok for tok in tokens if numeric_pattern.fullmatch(tok)]
+    if numeric_tokens:
+        tokens = numeric_tokens
+    elif not tokens:
+        tokens = re.findall(numeric_pattern, input_section)
+    else:
+        tokens.extend(re.findall(numeric_pattern, input_section))
+        tokens = [tok for tok in tokens if numeric_pattern.fullmatch(tok)]
+
+    if not tokens:
+        return False
+
+    plan = {
+        "tool": "python_run",
+        "args": [script],
+        "kwargs": {"inputs": tokens},
+    }
+
+    result = dispatch_tool(plan)
+    tool_name = result.get("tool", "python_run") if isinstance(result, dict) else "python_run"
+    output_module.print_agent_action(tool_name)
+    output_module.print_tool_result(tool_name, result if isinstance(result, dict) else result[0])
+    return True
 
 
 def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: bool, output_module):
@@ -87,6 +201,17 @@ def _print_recursive_listing(list_repo_files_recursive, output):
     output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
 
 
+def _should_route_to_summary(user_text: str) -> bool:
+    lowered = user_text.lower().strip()
+    if any(phrase in lowered for phrase in SUMMARY_TRIGGER_PHRASES):
+        return True
+    if lowered.startswith("summarize"):
+        return True
+    if "summarize" in lowered and any(keyword in lowered for keyword in ("repo", "repository", "project", "codebase", "code", "files")):
+        return True
+    return False
+
+
 def run_repl(deps: Dict[str, Any]) -> None:
     """Run the interactive REPL.
 
@@ -121,7 +246,7 @@ def run_repl(deps: Dict[str, Any]) -> None:
 
     while True:
         try:
-            line = input("\n>>> ")
+            line = _prompt_user_input_box(output)
         except (EOFError, KeyboardInterrupt):
             output.print_info("Exiting session.", title="Session")
             break
@@ -175,33 +300,17 @@ def run_repl(deps: Dict[str, Any]) -> None:
             continue
 
         user_text = line
-        output.print_user_input(user_text)
 
         if faq_handlers.handle_small_talk(user_text, append_history):
             continue
 
+        if _try_direct_python_run(user_text, dispatch_tool, output):
+            append_history(user_text, {"tool": "python_run"}, [])
+            continue
+
         # Shortcut: common summaries/explanations -> Task tool directly (no LLM)
-        lowered = user_text.lower().strip()
-        summary_triggers = (
-            "summarize the repo",
-            "summarize repository",
-            "summarize project",
-            "summarize the entire repo",
-            "summarize codebase",
-            "summarize the codebase",
-            "analyze repo",
-            "analyze repository",
-            "explain the codebase",
-            "explain the repo",
-            "explain project",
-            "what does it do",
-            "describe the repo",
-            "describe the codebase",
-            "overview of the repo",
-            "overview of the codebase",
-        )
-        if any(k in lowered for k in summary_triggers):
-            task_plan = {"steps": [{"tool": "task", "args": ["summarize repo", "", "general-purpose"], "kwargs": {}}]}
+        if _should_route_to_summary(user_text):
+            task_plan = {"steps": [{"tool": "task", "args": ["summarize repo", user_text, "general-purpose"], "kwargs": {}}]}
             results = dispatch_tool(task_plan)
             output.print_agent_action("Task")
             output.print_tool_result("Task", results if isinstance(results, dict) else results[0])
@@ -227,6 +336,11 @@ def run_repl(deps: Dict[str, Any]) -> None:
         ok, plan_or_err = generate_plan(user_text, retries=1)
         if not ok:
             output.print_error(f"LLM plan generation failed: {plan_or_err}")
+            if isinstance(plan_or_err, str) and "Model output did not contain JSON" in plan_or_err:
+                output.print_assistant(
+                    "I couldn't turn that into an action. Try phrasing it as an instruction, "
+                    "like 'update test.py so x equals 9 and y equals 10'."
+                )
             append_history(user_text, {"error": str(plan_or_err)}, [])
             continue
         plan = plan_or_err
