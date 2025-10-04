@@ -1,5 +1,6 @@
 # CodeGen-CLI - Coding Agent
-A simple command-line coding agent inspired by Claude Code and Cursor CLI, and powered by Google Gemini API. Published on PyPI for easy installation and updates.
+A powerful command-line coding agent with **iterative reasoning** capabilities, inspired by Claude Code and Cursor CLI, powered by Google Gemini API. Published on PyPI for easy installation and updates.
+
 > Think of it as an expert developer assistant that never gets tired.
 
 1. [CodeGen-CLI PyPI Package](https://pypi.org/project/codegen-cli/)
@@ -9,6 +10,7 @@ A simple command-line coding agent inspired by Claude Code and Cursor CLI, and p
 CodeGen-CLI is a small, easy-to-use agent that helps you explore and work with codebases using plain English. Instead of remembering many commands, you can ask the tool to find, read, or change code for you.
 
 ## Key features
+- **Agentic Loop**:Iterative reasoning where agent sees results and adapts strategy
 - **Natural language REPL**: Ask questions in plain English.
 - **Multi-language support**: Works with Python, JS, Go, Rust, Java, C#, PHP, Ruby.
 - **File tools**: read, write, edit, multiedit, delete.
