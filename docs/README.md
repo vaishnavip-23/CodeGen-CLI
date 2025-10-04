@@ -1,30 +1,44 @@
 # CodeGen-CLI - Coding Agent
+[CodeGen-CLI PyPI Package](https://pypi.org/project/codegen-cli/)
+
 A powerful command-line coding agent with **iterative reasoning** capabilities, inspired by Claude Code and Cursor CLI, powered by Google Gemini API. Published on PyPI for easy installation and updates.
 
 > Think of it as an expert developer assistant that never gets tired.
 
-1. [CodeGen-CLI PyPI Package](https://pypi.org/project/codegen-cli/)
+**BYOK (Bring Your Own Key)**: This tool requires you to provide your own Google Gemini API key. CodeGen-CLI does not include or provide API keys. You are responsible for obtaining a key and managing your API usage and costs.
 
-
-## What is CodeGen-CLI?
-CodeGen-CLI is a small, easy-to-use agent that helps you explore and work with codebases using plain English. Instead of remembering many commands, you can ask the tool to find, read, or change code for you.
+## Requirements
+- Python 3.10 or higher
+- Google Gemini API key (get one at https://aistudio.google.com/api-keys)
 
 ## Key features
-- **Agentic Loop**:Iterative reasoning where agent sees results and adapts strategy
-- **Natural language REPL**: Ask questions in plain English.
-- **Multi-language support**: Works with Python, JS, Go, Rust, Java, C#, PHP, Ruby.
-- **File tools**: read, write, edit, multiedit, delete.
-- **Search tools**: ls, glob, grep.
-- **Web helpers**: simple web search and fetch for documentation/examples.
-- **Safety-first**: previews edits, filters risky folders (.env), and asks for confirmation before destructive actions.
+- **Agentic Loop**: Iterative reasoning where agent sees results and adapts strategy for decision making
+- **Natural language REPL**: Ask questions in plain English
+- **Auto-detection**: Automatically detects project type (Python, JS, Go, Rust, Java, C#, PHP, Ruby) and package managers (pip, poetry, npm, yarn, cargo, etc.)
+- **12 Built-in Tools**:
+  - File operations: read_file, write_file, edit_file, multi_edit, delete_file
+  - Search tools: list_files (ls), find_files (glob), grep
+  - Execution: run_command (bash)
+  - Task management: manage_todos
+  - Web helpers: fetch_url, search_web
+- **Safety-first**: Previews edits, filters risky folders (.env), and asks for confirmation before destructive actions
 
-## Quick start
-Get a Gemini API key from Google AI Studio and store it in your codebase root:
-> Make sure you add the API key to your gitignore file.
+## API and Installation Guide
+Get a Gemini API key from Google AI Studio and choose one of the following options
+### Option 1: Use the --set-key command 
+```bash
+codegen --set-key YOUR_API_KEY
+```
+This saves the key to `~/.config/codegen/.env` so it's available for all projects.
+
+### Option 2: Project .env file
+Create a `.env` file in your project root:
 ```bash
 GEMINI_API_KEY=your_api_key
 ```
-Locally and packaged, users can use it both ways:
+> There's a `.env.example` file for your reference in the project root. Make sure to add `.env` to your `.gitignore` file!
+
+You can use the agent in both ways:
 1. Package (PyPI) — users can install and run the published package:
 ```bash
 pip install codegen-cli
@@ -34,31 +48,18 @@ codegen
 ```bash
 git clone https://github.com/vaishnavip-23/CodeGen-CLI.git
 cd codegen-cli
-uv run -m codegen_cli.cli 
+python -m codegen_cli.main
 ```
-If uv run -m is not available in your environment, you can use 
+Or run directly with uv:
 ```bash 
-python -m codegen_cli.cli 
+uv run -m codegen_cli.main
 ```
-
-## Usage Examples
-
-🚀 CodeGen CLI - Quick Demo
-
-- Workspace: path/to/workspace
-- Language: python
-- Package Manager: poetry
-- Gemini API key: set
-- Type 'help' for help. Try natural language like 'summarize the repo'.
-- Non-destructive steps run immediately. Destructive steps require confirmation.
-
-```text
-help
-ls
-read README.md
-grep "def my_function"
-can you create a file called hello.py with the hello world code
-```
+## How to Use
+Once in the REPL, you can:
+- Use natural language: "find all functions named test_*"
+- Use tool names directly: "read README.md", "grep 'TODO'"
+- Ask for help: Type "help" for guidance
+- Exit: Press Ctrl+C or Ctrl+D to exit
 
 ## License
 This project uses the **MIT License**. See the `LICENSE` file for details.
