@@ -9,7 +9,50 @@ It includes content length limits and error handling.
 
 import requests
 from bs4 import BeautifulSoup
-from typing import Dict, Any, Optional
+from typing import Dict, Any
+
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
+# Function declaration for Gemini function calling  
+FUNCTION_DECLARATION = {
+    "name": "fetch_url",
+    "description": "Fetch and extract text content from a web URL. Use for documentation, articles, or web resources.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "URL to fetch content from"
+            },
+            "max_chars": {
+                "type": "integer",
+                "description": "Maximum characters to return (default: 20000)"
+            }
+        },
+        "required": ["url"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "url": types.Schema(type=types.Type.STRING, description="URL to fetch"),
+                "max_chars": types.Schema(type=types.Type.INTEGER, description="Max characters (default: 20000)")
+            },
+            required=["url"]
+        )
+    )
 
 def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
     """

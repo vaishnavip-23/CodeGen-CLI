@@ -10,6 +10,59 @@ import py_compile
 import re
 import traceback
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "edit_file",
+    "description": "Edit an existing file by finding and replacing text. Read the file first to know exact text to replace.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to file to edit"
+            },
+            "old_string": {
+                "type": "string",
+                "description": "Exact text to find and replace"
+            },
+            "new_string": {
+                "type": "string",
+                "description": "New text to insert"
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace all occurrences (default: false)"
+            }
+        },
+        "required": ["path", "old_string", "new_string"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "path": types.Schema(type=types.Type.STRING, description="Path to file to edit"),
+                "old_string": types.Schema(type=types.Type.STRING, description="Exact text to find and replace"),
+                "new_string": types.Schema(type=types.Type.STRING, description="New text to insert"),
+                "replace_all": types.Schema(type=types.Type.BOOLEAN, description="Replace all occurrences (default: false)")
+            },
+            required=["path", "old_string", "new_string"]
+        )
+    )
+
 def _check_python_syntax(file_path: str) -> dict:
     if not file_path.endswith(".py"):
         return {"checked": False}

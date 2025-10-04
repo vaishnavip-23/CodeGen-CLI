@@ -11,7 +11,49 @@ import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any
 
-                                 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "search_web",
+    "description": "Search the web using DuckDuckGo for information, documentation, or examples.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query"
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum number of results (1-20, default: 5)"
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "query": types.Schema(type=types.Type.STRING, description="Search query"),
+                "max_results": types.Schema(type=types.Type.INTEGER, description="Max results (1-20)")
+            },
+            required=["query"]
+        )
+    )
+
 DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/"
 
 def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:

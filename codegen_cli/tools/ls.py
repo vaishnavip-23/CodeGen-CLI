@@ -8,10 +8,58 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 DEFAULT_IGNORE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", ".env", 
     ".cache", ".pytest_cache", "dist", "build"
 }
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "list_files",
+    "description": "List files and directories in the workspace. Use to discover project structure.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Directory path to list (default: '.')"
+            },
+            "depth": {
+                "type": "integer",
+                "description": "Maximum depth to traverse (default: unlimited)"
+            },
+            "show_hidden": {
+                "type": "boolean",
+                "description": "Show hidden files (default: false)"
+            }
+        },
+        "required": []
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "path": types.Schema(type=types.Type.STRING, description="Directory path to list (default: '.')"),
+                "depth": types.Schema(type=types.Type.INTEGER, description="Maximum depth to traverse"),
+                "show_hidden": types.Schema(type=types.Type.BOOLEAN, description="Show hidden files")
+            },
+            required=[]
+        )
+    )
 
 def read_gitignore_patterns(root: Path) -> List[str]:
     """Read .gitignore file and extract simple directory patterns."""

@@ -9,7 +9,45 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, List
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 WORKSPACE = Path(os.getcwd())
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "delete_file",
+    "description": "Delete a file or directory. Use with caution - this is destructive.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to file or directory to delete"
+            }
+        },
+        "required": ["path"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "path": types.Schema(type=types.Type.STRING, description="Path to file or directory to delete")
+            },
+            required=["path"]
+        )
+    )
 
 
 def _paths_for_pattern(pattern: str) -> List[Path]:
@@ -97,7 +135,8 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
     confirmations = []
     deleted = []
     skipped = []
-    auto_confirm = os.environ.get("CODEGEN_AUTO_CONFIRM") == "1"
+    # Check for confirmation bypass from kwargs or environment
+    auto_confirm = kwargs.get("confirm", False) or os.environ.get("CODEGEN_AUTO_CONFIRM") == "1"
 
     for match in matches:
         rel = match.relative_to(WORKSPACE)

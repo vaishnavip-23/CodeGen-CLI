@@ -8,10 +8,53 @@ import shlex
 import subprocess
 from typing import List, Dict, Any, Union
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 DISALLOWED_COMMANDS = {
     "sudo", "ssh", "scp", "rm -rf", "reboot", "shutdown", "poweroff",
     "su", "passwd", "chmod 777", "chown", "dd", "mkfs", "fdisk"
 }
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "run_command",
+    "description": "Execute a shell command safely. Use only when no specialized tool exists. Dangerous commands are blocked.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "Shell command to execute"
+            },
+            "description": {
+                "type": "string",
+                "description": "Description of what this command does"
+            }
+        },
+        "required": ["command"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "command": types.Schema(type=types.Type.STRING, description="Shell command to execute"),
+                "description": types.Schema(type=types.Type.STRING, description="Description of what this command does")
+            },
+            required=["command"]
+        )
+    )
 
 def is_command_allowed(command: List[str]) -> tuple[bool, str]:
     """Check if command is allowed to execute."""
@@ -28,15 +71,26 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
     timeout_ms = kwargs.get("timeout_ms", 120000)
     description = kwargs.get("description")
     
+    # Check if command contains shell features (pipes, redirections, etc.)
+    shell_features = ['|', '>', '<', '&', ';', '&&', '||', '2>&1']
+    use_shell = False
+    
     if isinstance(command, str):
-        try:
-            command_parts = shlex.split(command)
-        except ValueError as e:
-            return {
-                "tool": "bash",
-                "success": False,
-                "output": f"Invalid command syntax: {e}"
-            }
+        # Check if we need shell mode
+        use_shell = any(feature in command for feature in shell_features)
+        
+        if not use_shell:
+            try:
+                command_parts = shlex.split(command)
+            except ValueError as e:
+                return {
+                    "tool": "bash",
+                    "success": False,
+                    "output": f"Invalid command syntax: {e}"
+                }
+        else:
+            # For shell commands, keep as string
+            command_parts = command
     else:
         command_parts = command
     
@@ -47,8 +101,9 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
             "output": "No command provided"
         }
     
-                                 
-    allowed, reason = is_command_allowed(command_parts)
+    # Security check
+    check_cmd = command_parts if isinstance(command_parts, str) else " ".join(command_parts)
+    allowed, reason = is_command_allowed([check_cmd])
     if not allowed:
         return {
             "tool": "bash",
@@ -57,13 +112,23 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
         }
     
     try:
-                         
-        result = subprocess.run(
-            command_parts,
-            capture_output=True,
-            text=True,
-            timeout=timeout_ms / 1000.0
-        )
+        if use_shell:
+            # Use shell mode for complex commands
+            result = subprocess.run(
+                command_parts,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout_ms / 1000.0
+            )
+        else:
+            # Use array mode for simple commands (safer)
+            result = subprocess.run(
+                command_parts,
+                capture_output=True,
+                text=True,
+                timeout=timeout_ms / 1000.0
+            )
         
         output_text = result.stdout
         if result.stderr:

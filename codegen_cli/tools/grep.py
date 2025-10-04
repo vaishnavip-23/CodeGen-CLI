@@ -9,7 +9,55 @@ import re
 from glob import glob
 from typing import List, Dict, Any
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 WORKSPACE = os.getcwd()
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "grep",
+    "description": "Search for text patterns across files using regular expressions. Great for finding specific code patterns.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": "Search pattern (regex supported)"
+            },
+            "path_pattern": {
+                "type": "string",
+                "description": "File pattern to search in (e.g., '**/*.py' for all Python files, default: '**/*.py')"
+            },
+            "output_mode": {
+                "type": "string",
+                "description": "Output format: 'content' (default), 'files_with_matches', or 'count'"
+            }
+        },
+        "required": ["pattern"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "pattern": types.Schema(type=types.Type.STRING, description="Search pattern (regex supported)"),
+                "path_pattern": types.Schema(type=types.Type.STRING, description="File pattern to search in (e.g., '**/*.py' for all Python files)"),
+                "output_mode": types.Schema(type=types.Type.STRING, description="Output format: 'content', 'files_with_matches', or 'count'")
+            },
+            required=["pattern"]
+        )
+    )
 
 def is_safe_path(file_path: str) -> bool:
     """Check if file path is within workspace."""

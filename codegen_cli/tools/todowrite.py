@@ -12,7 +12,71 @@ from pathlib import Path
 import json
 from typing import List, Dict, Any
 
-                                                              
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "manage_todos",
+    "description": "Manage todo list - add, list, update, or clear todos. Can accept full todo list for updates.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "description": "Action: 'add', 'list', 'pop', 'clear', or provide todos array directly"
+            },
+            "text": {
+                "type": "string",
+                "description": "Todo text when action is 'add'"
+            },
+            "todos": {
+                "type": "array",
+                "description": "Full list of todos to replace current list",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "content": {"type": "string"},
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}
+                    }
+                }
+            }
+        }
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description="Manage todo list - add tasks, mark done (pop), list, or clear. Use this to organize multi-step work.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "action": types.Schema(type=types.Type.STRING, description="Action: 'add' (create todo), 'list' (show all), 'pop' (mark first todo done), 'clear' (remove all)"),
+                "text": types.Schema(type=types.Type.STRING, description="REQUIRED when action='add'. The todo task description. Example: 'Read main.py file'"),
+                "todos": types.Schema(
+                    type=types.Type.ARRAY,
+                    description="Full list of todos",
+                    items=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "id": types.Schema(type=types.Type.STRING),
+                            "content": types.Schema(type=types.Type.STRING),
+                            "status": types.Schema(type=types.Type.STRING)
+                        }
+                    )
+                )
+            }
+        )
+    )
+
 def _resolve_db_paths():
     env_override = os.environ.get("CODEGEN_TODOS_PATH")
     if env_override:
@@ -96,7 +160,7 @@ def add_todo(text: str) -> Dict[str, Any]:
     return {
         "tool": "todowrite",
         "success": True,
-        "output": f"Added todo: {text.strip()}"
+        "output": todos  # Return full list so agent can see current state
     }
 
 def list_todos() -> Dict[str, Any]:
@@ -134,7 +198,7 @@ def remove_first_todo() -> Dict[str, Any]:
     return {
         "tool": "todowrite",
         "success": True,
-        "output": f"Removed: {removed_todo}"
+        "output": todos  # Return remaining todos so agent can see what's left
     }
 
 def clear_todos() -> Dict[str, Any]:
@@ -257,7 +321,14 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     action = action or "list"
     
     if action == "add":
-        text = " ".join(args) if args else ""
+        # Get text from either args or kwargs
+        text = " ".join(args) if args else kwargs.get("text", "")
+        if not text:
+            return {
+                "tool": "todowrite",
+                "success": False,
+                "output": "Please provide todo text. Example: manage_todos(action='add', text='List all files')"
+            }
         return add_todo(text)
     
     elif action == "list":

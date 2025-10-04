@@ -11,8 +11,45 @@ import os
 import glob
 from typing import List, Dict, Any
 
-                                     
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 WORKSPACE = os.getcwd()
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "find_files",
+    "description": "Find files using glob patterns. Use for finding specific file types or names.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": "Glob pattern (e.g., '**/*.py' for all Python files, default: '**/*')"
+            }
+        },
+        "required": []
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "pattern": types.Schema(type=types.Type.STRING, description="Glob pattern (e.g., '**/*.py' for all Python files)")
+            },
+            required=[]
+        )
+    )
 
 def is_safe_path(file_path: str) -> bool:
     """

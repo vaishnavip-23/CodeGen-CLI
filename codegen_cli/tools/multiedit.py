@@ -6,7 +6,72 @@ import traceback
 
 from .edit import call as edit_call
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 WORKSPACE = os.getcwd()
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "multi_edit",
+    "description": "Perform multiple file edits atomically in sequence. All edits must succeed or all fail.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Base file path (if all edits are to same file)"
+            },
+            "edits": {
+                "type": "array",
+                "description": "Array of edit operations",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "File path (overrides base path)"},
+                        "old_string": {"type": "string", "description": "Text to find"},
+                        "new_string": {"type": "string", "description": "Replacement text"},
+                        "replace_all": {"type": "boolean", "description": "Replace all occurrences"}
+                    },
+                    "required": ["old_string", "new_string"]
+                }
+            }
+        },
+        "required": ["edits"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "path": types.Schema(type=types.Type.STRING, description="Base file path"),
+                "edits": types.Schema(
+                    type=types.Type.ARRAY,
+                    description="Array of edit operations",
+                    items=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "path": types.Schema(type=types.Type.STRING, description="File path"),
+                            "old_string": types.Schema(type=types.Type.STRING, description="Text to find"),
+                            "new_string": types.Schema(type=types.Type.STRING, description="Replacement text"),
+                            "replace_all": types.Schema(type=types.Type.BOOLEAN, description="Replace all occurrences")
+                        }
+                    )
+                )
+            },
+            required=["edits"]
+        )
+    )
 
 
 def _check_python_files(paths):

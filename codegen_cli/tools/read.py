@@ -6,7 +6,55 @@ Read tool - reads file contents safely within workspace.
 
 import os
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 WORKSPACE = os.getcwd()
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "read_file",
+    "description": "Read the contents of a file in the workspace. Use this to examine code, configuration, or any text file.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Relative path to the file from workspace root"
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Line number to start reading from (0-based, optional)"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of lines to read (optional)"
+            }
+        },
+        "required": ["path"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "path": types.Schema(type=types.Type.STRING, description="Relative path to the file from workspace root"),
+                "offset": types.Schema(type=types.Type.INTEGER, description="Line number to start reading from (0-based, optional)"),
+                "limit": types.Schema(type=types.Type.INTEGER, description="Maximum number of lines to read (optional)")
+            },
+            required=["path"]
+        )
+    )
 
 def is_safe_path(file_path: str) -> bool:
     """Check if file path is within workspace."""

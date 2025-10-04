@@ -6,7 +6,50 @@ Write tool - creates or overwrites files safely within workspace.
 
 import os
 
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
 WORKSPACE = os.getcwd()
+
+# Function declaration for Gemini function calling
+FUNCTION_DECLARATION = {
+    "name": "write_file",
+    "description": "Create a new file or overwrite an existing file with content. Use for creating new files only.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path where file should be created"
+            },
+            "content": {
+                "type": "string",
+                "description": "Content to write to the file"
+            }
+        },
+        "required": ["path", "content"]
+    }
+}
+
+def get_function_declaration():
+    """Get Gemini function declaration for this tool."""
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration(
+        name=FUNCTION_DECLARATION["name"],
+        description=FUNCTION_DECLARATION["description"],
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "path": types.Schema(type=types.Type.STRING, description="Path where file should be created"),
+                "content": types.Schema(type=types.Type.STRING, description="Content to write to the file")
+            },
+            required=["path", "content"]
+        )
+    )
 
 def is_safe_path(file_path: str) -> bool:
     """Check if file path is within workspace."""
@@ -19,7 +62,10 @@ def is_safe_path(file_path: str) -> bool:
 
 def call(path: str, *args, **kwargs) -> dict:
     """Write content to file, creating directories if needed."""
-    content = " ".join(str(arg) for arg in args) if args else ""
+    # Get content from kwargs first, then args
+    content = kwargs.get("content", "")
+    if not content and args:
+        content = " ".join(str(arg) for arg in args)
     
     if not is_safe_path(path):
         return {
