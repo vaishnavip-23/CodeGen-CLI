@@ -1,55 +1,188 @@
-# behavior.md — working notes & heuristics (Claude Code style)
+# behavior.md — Agentic Loop Guidelines
 
-This file supplements the system prompt with practical heuristics. Keep it tight, opinionated, and easy to skim.
+This file provides practical guidance for the iterative agentic approach used by CodeGen CLI.
 
-## 1. Discovery-first mindset
+## 1. Iterative Mindset
 
-Before changing anything, **map → search → inspect**:
-1. `LS` or `Glob` for structure.
-2. `Grep` to home in on relevant spots.
-3. `Read` to confirm context.
-Only then decide whether a change is needed and which tool achieves it with minimal blast radius.
+The agent works in iterations, not with upfront planning:
+1. **See the current state** - understand what's known so far
+2. **Choose one action** - select the best single tool for the next step
+3. **Execute and observe** - run the tool and see the result
+4. **Adapt** - decide the next action based on what was learned
+5. **Repeat** - continue until the goal is achieved
 
-## 2. Tool choice rules of thumb
+## 2. Discovery-First Approach
 
-- **Existing file?** Prefer `Edit`/`MultiEdit`. Quote the exact snippet you intend to change.
-- **New artifact?** Use `Write`. Overwrites require explicit `force=True` in the JSON and a user instruction that justifies it.
-- **Many similar changes?** Reach for `MultiEdit` with clear edit objects.
-- **Need a command shell?** Use `Bash` only when no higher-level tool exists; explain the intent via `description`.
-- **Deleting?** The `Delete` tool already handles discovery + confirmation—no need to insert your own guard rails.
-- **Python workflows?** `python_check` before/after risky edits; `python_run` for executing scripts (with `inputs`/`stdin` if needed).
-- **Planning multi-step work?** Create/update a Todo list via `TodoWrite` as soon as you see ≥3 meaningful actions. Keep statuses (`pending` → `in_progress` → `completed`) accurate.
+Always explore before modifying:
+- Use `list_files` to understand project structure
+- Use `find_files` to locate specific files by pattern
+- Use `grep` to search for content across files
+- Use `read_file` to inspect file contents before editing
 
-## 3. Planning etiquette
+Example flow:
+```
+User: "Update the version number"
+Iteration 1: find_files("**/setup.py") → found setup.py
+Iteration 2: read_file("setup.py") → see current version
+Iteration 3: edit_file(path, old_ver, new_ver) → make change
+Iteration 4: task_complete("Updated version")
+```
 
-- One plan step = one tool call. Nesting multiple actions inside a single command is discouraged.
-- `explain` should preview the intent and mention if destructive tools are present (“Updates config setting and reruns tests”).
-- If the user declines destructive steps, replan with safer alternatives or report that the task was skipped.
-- Keep history entries succinct: timestamp, user text, plan summary, key results.
+## 3. Tool Selection Rules
 
-## 4. Error handling & resilience
+### File Operations
+- **Creating new files**: `write_file(path, content)`
+- **Modifying existing**: Read first, then `edit_file(path, old, new)`
+- **Multiple changes**: Use `multi_edit(path, edits)` for batch changes
+- **Deleting**: `delete_file(path)` has built-in confirmation
 
-- When a tool errors, surface the error message in the results and pause further destructive actions. Re-plan only after acknowledging the failure.
-- If the LLM ever produces invalid JSON, re-prompt yourself internally and regenerate a valid plan.
-- Plans with zero steps should only respond to conversational prompts. If the request was actionable, generate steps.
+### Search & Discovery
+- **Structure exploration**: `list_files(path, depth)`
+- **Pattern matching**: `find_files(pattern="**/*.py")`
+- **Content search**: `grep(pattern, path_pattern)`
 
-## 5. Secrets & sensitive data
+### System Operations
+- **Prefer specific tools**: Don't use `run_command` if a specialized tool exists
+- **Command safety**: Dangerous commands are blocked
+- **Last resort**: Use bash only when absolutely necessary
 
-- Treat anything resembling keys, passwords, tokens, or certificates as sensitive. Do not echo them; notify the user that redaction is required.
-- Never copy secrets into history or output.
+## 4. Adapting to Results
 
-## 6. Communication style
+**When a tool succeeds:**
+- Extract relevant information
+- Update working memory
+- Decide the next logical step
 
-- Structured responses: headings, bullet lists, tables where helpful.
-- Repository or feature summaries stay under 600 words and follow `Overview → Key Components → Workflow → Next Steps`.
-- Avoid filler language. Be direct, confident, and neutral in tone.
-- No emojis unless explicitly requested.
+**When a tool fails:**
+- Analyze the error message
+- Consider alternative approaches
+- Try a different tool or different parameters
+- Don't repeat the same failing action
 
-## 7. Quick reference scenarios
+**Example adaptation:**
+```
+Try: edit_file("config.py", "old_text", "new_text")
+Fail: "Text 'old_text' not found"
+Adapt: Read file first to get exact text
+Next: read_file("config.py")
+```
 
-- **Refactor across several files**: `TodoWrite` plan → discovery (`Glob`/`Grep`) per file → `Read` → `MultiEdit` or `Edit` → `python_check`/tests.
-- **Investigate bug report**: map directory → search stack symbol with `Grep` → `Read` relevant modules → plan fix if requested.
-- **Add documentation**: confirm target path, create file with `Write`, link from README if needed using `Edit`.
-- **Run diagnostics**: prefer bespoke tools (`python_check`, test runners) before generic `Bash`.
+## 5. Working Memory & Context
+
+The agent maintains context across iterations:
+- **Recent observations**: Results from last few tools
+- **Discovered files**: Paths found during search
+- **Current understanding**: What's known about the codebase
+- **Remaining work**: What still needs to be done
+
+Use this context to make informed decisions about the next action.
+
+## 6. Completion Criteria
+
+Call `task_complete` when:
+- ✓ User's stated goal is achieved
+- ✓ All requested changes are made
+- ✓ All requested information is gathered
+- ✓ No additional work is needed
+- ✓ Further actions would be outside the scope
+
+Do NOT call task_complete if:
+- ✗ There are errors or failures
+- ✗ Changes are incomplete
+- ✗ The user's goal isn't fully met
+- ✗ You're uncertain about the result
+
+## 7. Error Handling
+
+**Graceful failure:**
+- Acknowledge the error clearly
+- Explain what went wrong
+- Try an alternative approach
+- Ask for clarification if needed
+
+**Don't:**
+- Repeat failed actions without changes
+- Continue with dependent steps after a failure
+- Ignore error messages
+- Make assumptions when uncertain
+
+## 8. Communication Style
+
+**During iterations:**
+- Brief explanations of reasoning
+- Clear descriptions of what you're doing
+- Honest about uncertainties
+- Direct and actionable
+
+**In responses:**
+- Start with thinking/reasoning (optional)
+- Explain the next action briefly
+- No unnecessary preamble
+- No emojis unless requested
+
+## 9. Multi-Step Workflows
+
+For complex tasks that span many iterations:
+
+**Pattern 1: Search → Read → Edit**
+```
+1. find_files or grep to locate relevant files
+2. read_file to understand current state
+3. edit_file to make precise changes
+4. task_complete with summary
+```
+
+**Pattern 2: Explore → Create → Verify**
+```
+1. list_files to understand structure
+2. write_file to create new content
+3. read_file to verify it was created correctly
+4. task_complete with summary
+```
+
+**Pattern 3: Multi-file changes**
+```
+1. find_files to get all target files
+2. Loop through each file:
+   a. read_file
+   b. edit_file or multi_edit
+3. task_complete after all changes
+```
+
+## 10. Best Practices Summary
+
+✓ **DO:**
+- Use discovery tools before making changes
+- Read files before editing them
+- Choose one clear action per iteration
+- Adapt based on tool results
+- Complete when the goal is achieved
+- Explain your reasoning briefly
+
+✗ **DON'T:**
+- Make assumptions about file paths
+- Edit files without reading them first
+- Continue after failures without adapting
+- Use bash when specialized tools exist
+- Fabricate file contents or paths
+- Make changes outside the workspace
+
+## Quick Reference
+
+**Starting a task:**
+1. Understand the goal
+2. Plan the first discovery step
+3. Execute and observe
+
+**During iterations:**
+1. Analyze the last result
+2. Update understanding
+3. Choose next action
+4. Execute
+
+**Completing a task:**
+1. Verify goal is met
+2. Call task_complete
+3. Summarize what was done
 
 End of behavior.md
