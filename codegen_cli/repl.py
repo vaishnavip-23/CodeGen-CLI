@@ -1,40 +1,22 @@
-# File Summary: Interactive REPL loop that parses input and executes plans.
+# File Summary: New REPL using agentic loop instead of one-shot planning.
 
 """
-REPL loop for CodeGen CLI.
+REPL for CodeGen CLI.
 
-This module contains the interactive loop and related helpers, keeping
-`main.py` focused on configuration and orchestration.
+Uses iterative decision-making with Gemini function calling.
 """
 
-
-import re
+import os
 import shutil
 import sys
 import textwrap
 from typing import Any, Dict
 
-SUMMARY_TRIGGER_PHRASES = (
-    "summarize the repo",
-    "summarize repository",
-    "summarize project",
-    "summarize the entire repo",
-    "summarize codebase",
-    "summarize the codebase",
-    "analyze repo",
-    "analyze repository",
-    "explain the codebase",
-    "explain the repo",
-    "explain project",
-    "what does it do",
-    "describe the repo",
-    "describe the codebase",
-    "overview of the repo",
-    "overview of the codebase",
-)
+from .call_tools import create_agentic_loop
 
 
 def _prompt_user_input_box(output_module) -> str:
+    """Prompt user for input with styled box."""
     color = output_module.Color
     border = color.BORDER
     reset = color.RESET
@@ -55,10 +37,8 @@ def _prompt_user_input_box(output_module) -> str:
         "Type your instruction and press Enter.",
         "Natural language requests are welcome; commands are optional."
     ]
-    instruction_blocks = []
     for line in instructions:
         wrapped = textwrap.wrap(line, inner) or [""]
-        instruction_blocks.append(wrapped)
         for segment in wrapped:
             print(f"{border}│{reset} {color.TEXT}{segment.ljust(inner)}{reset} {border}│{reset}")
 
@@ -75,8 +55,6 @@ def _prompt_user_input_box(output_module) -> str:
     user_line = raw.rstrip("\n")
 
     wrapped_input = textwrap.wrap(user_line, inner) or [""]
-
-                                                        
     sys.stdout.write("\x1b[1A")
     for idx, segment in enumerate(wrapped_input):
         if idx > 0:
@@ -87,44 +65,8 @@ def _prompt_user_input_box(output_module) -> str:
     return user_line
 
 
-def _try_direct_python_run(user_text: str, dispatch_tool, output_module) -> bool:
-    match = re.search(r"run\s+([^\s]+)\s+(?:with\s+inputs?\s+)?(.+)", user_text, re.IGNORECASE)
-    if not match:
-        return False
-
-    script = match.group(1).strip()
-    input_section = match.group(2).strip()
-
-    input_section = re.split(r"\b(?:and then|and)\b|\.", input_section, maxsplit=1, flags=re.IGNORECASE)[0].strip()
-
-    tokens = [tok.strip() for tok in re.split(r",|\s+", input_section) if tok.strip()]
-    numeric_pattern = re.compile(r"[-+]?\d*\.?\d+")
-    numeric_tokens = [tok for tok in tokens if numeric_pattern.fullmatch(tok)]
-    if numeric_tokens:
-        tokens = numeric_tokens
-    elif not tokens:
-        tokens = re.findall(numeric_pattern, input_section)
-    else:
-        tokens.extend(re.findall(numeric_pattern, input_section))
-        tokens = [tok for tok in tokens if numeric_pattern.fullmatch(tok)]
-
-    if not tokens:
-        return False
-
-    plan = {
-        "tool": "python_run",
-        "args": [script],
-        "kwargs": {"inputs": tokens},
-    }
-
-    result = dispatch_tool(plan)
-    tool_name = result.get("tool", "python_run") if isinstance(result, dict) else "python_run"
-    output_module.print_agent_action(tool_name)
-    output_module.print_tool_result(tool_name, result if isinstance(result, dict) else result[0])
-    return True
-
-
 def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: bool, output_module):
+    """Print welcome banner."""
     color = output_module.Color
 
     title_line = f"{color.ACCENT}{color.BOLD}CodeGen CLI{color.RESET} {color.MUTED}— Universal Coding Agent{color.RESET}"
@@ -143,13 +85,9 @@ def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: boo
 
     tips = [
         f"{color.ACCENT}Tips{color.RESET}:",
-        "  • Type 'help' for guidance or ask in natural language.",
-        "  • Non-destructive steps run immediately; destructive ones ask first.",
-        "  • Keep CodeGen-CLI up to date:",
-        "      - Check latest: codegen --check-update",
-        "      - Upgrade: pip install -U codegen-cli",
-        "      - Pin specific: pip install codegen-cli==<version>",
-        "      - PyPI: https://pypi.org/project/codegen-cli/",
+        "  • Try: 'Update all print statements to use logging'",
+        "  • Agent works iteratively: discovers, plans, executes",
+        "  • Type 'help' for guidance",
     ]
 
     if not has_key:
@@ -160,98 +98,32 @@ def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: boo
     output_module.print_boxed("Welcome", banner_body, style="banner")
 
 
-def _simple_split_first_word(line: str) -> str:
-    if not line:
-        return ""
-    return line.strip().split()[0].lower()
-
-
-def _is_likely_natural_language(line: str) -> bool:
-    first = _simple_split_first_word(line)
-    known_tools = {
-        "read", "ls", "glob", "grep", "write", "edit", "multiedit",
-        "todowrite", "webfetch", "websearch", "bash", "task", "delete", "todo"
-    }
-    if first in ("help", "exit", "quit"):
-        return False
-    return first not in known_tools
-
-
-def _parse_as_tool_invocation(line: str):
-    s = line.strip()
-    if not s:
-        return None
-    if s.startswith("{") or s.startswith("["):
-        import json
-        try:
-            return json.loads(s)
-        except Exception:
-            return None
-    parts = s.split()
-    tool = parts[0]
-    args = parts[1:]
-    kwargs: Dict[str, Any] = {}
-    if tool.lower() in ("list",) and len(args) >= 1 and args[0].lower().startswith("file"):
-        return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
-    if tool.lower() == "ls" and not args:
-        return {"tool": "ls", "args": [".", {"depth": None}], "kwargs": {}}
-    return {"tool": tool, "args": args, "kwargs": kwargs}
-
-
-def _print_recursive_listing(list_repo_files_recursive, output):
-    files = list_repo_files_recursive(".")
-    output.print_boxed("Repository files (recursive)", "\n".join(files[:5000]))
-
-
-def _should_route_to_summary(user_text: str) -> bool:
-    lowered = user_text.lower().strip()
-
-    def _looks_like_path(text: str) -> bool:
-        if "/" in text or "\\" in text:
-            return True
-        import re as _re
-        return bool(_re.search(r"\b\w+\.(py|js|ts|tsx|json|md|txt|yaml|yml|ini|cfg)\b", text))
-
-    if any(phrase in lowered for phrase in SUMMARY_TRIGGER_PHRASES):
-        return True
-
-    if "summarize" in lowered:
-        if _looks_like_path(lowered):
-            return False
-        if any(keyword in lowered for keyword in ("repo", "repository", "project", "codebase", "overview")):
-            return True
-
-    return False
-
-
 def run_repl(deps: Dict[str, Any]) -> None:
-    """Run the interactive REPL.
-
+    """Run the REPL with agentic loop and function calling.
+    
     Expected deps:
       - workspace_root: str
       - project_info: dict
-      - dispatch_tool: callable
       - output: module with print_* functions
-      - faq_handlers: module with handle_small_talk(user_text, append_history)
-      - append_history: callable(user_text, agent_plan, results)
-      - list_repo_files_recursive: callable
-      - generate_plan: callable
-      - destructive_tools: set[str]
+      - handle_small_talk: function for small talk handling
+      - append_history: callable
       - ensure_client: callable -> client or None
     """
     workspace_root = deps["workspace_root"]
     project_info = deps["project_info"]
-    dispatch_tool = deps["dispatch_tool"]
     output = deps["output"]
-    faq_handlers = deps["faq_handlers"]
+    handle_small_talk = deps["handle_small_talk"]
     append_history = deps["append_history"]
-    list_repo_files_recursive = deps["list_repo_files_recursive"]
-    generate_plan = deps["generate_plan"]
-    destructive_tools = deps["destructive_tools"]
     ensure_client = deps["ensure_client"]
 
-    ensure_client()
-    import os
+    client = ensure_client()
+    if client is None:
+        output.print_error("Failed to initialize Gemini client. Check your API key.")
+        return
+
+    # Initialize agentic loop (tools are loaded automatically from registry)
+    agent = create_agentic_loop(client, output)
+
     _print_intro(workspace_root, project_info, bool(os.environ.get("GEMINI_API_KEY")), output)
 
     while True:
@@ -267,138 +139,58 @@ def run_repl(deps: Dict[str, Any]) -> None:
             continue
 
         low = line.strip().lower()
+        
+        # Handle built-in commands
         if low in ("help", "--help", "-h"):
             try:
                 output.print_help(project_info)
             except Exception:
-                output.print_assistant("Help: try natural language or tool invocations like 'read README.md' or 'list files'.")
+                output.print_assistant("Help: try natural language or tool invocations.")
             continue
         if low in ("exit", "quit"):
             output.print_assistant("Bye.")
             break
 
-        if low in ("list files", "list all files", "ls -r", "ls -R"):
-            _print_recursive_listing(list_repo_files_recursive, output)
-            append_history(line, {"steps": [], "explain": "list_files_recursive"}, [])
+        # Handle small talk
+        if handle_small_talk(line, append_history):
             continue
 
-        if low.startswith("todo "):
-            parsed = _parse_as_tool_invocation("todowrite " + line[len("todo "):])
-            res = dispatch_tool(parsed)
-            output.print_tool_result(parsed.get("tool"), res)
-            append_history(line, parsed, [res])
-            continue
-
-        if not _is_likely_natural_language(line):
-            parsed = _parse_as_tool_invocation(line)
-            if parsed is None:
-                output.print_error("Could not parse tool invocation.")
-                continue
-
-            if parsed.get("tool", "").lower() == "ls":
-                try:
-                    res = dispatch_tool(parsed)
-                    output.print_tool_result(parsed.get("tool"), res)
-                    append_history(line, parsed, [res])
-                except Exception as e:
-                    output.print_error(f"LS tool failed: {e}")
-                continue
-
-            results = dispatch_tool(parsed)
-            output.print_tool_result(parsed.get("tool"), results)
-            append_history(line, parsed, [results])
-            continue
-
-        user_text = line
-
-        if faq_handlers.handle_small_talk(user_text, append_history):
-            continue
-
-        if _try_direct_python_run(user_text, dispatch_tool, output):
-            append_history(user_text, {"tool": "python_run"}, [])
-            continue
-
-                                                                                
-        if _should_route_to_summary(user_text):
-            task_plan = {"steps": [{"tool": "task", "args": ["summarize repo", user_text, "general-purpose"], "kwargs": {}}]}
-            results = dispatch_tool(task_plan)
-            output.print_agent_action("Task")
-            output.print_tool_result("Task", results if isinstance(results, dict) else results[0])
-            append_history(user_text, task_plan, results if isinstance(results, list) else [results])
-            continue
-
-                                                                                      
-        if "```" in user_text:
-            try:
-                                                           
-                parts = user_text.split("```")
-                code_text = parts[1] if len(parts) >= 3 else ""
-                if code_text.strip():
-                    task_plan = {"steps": [{"tool": "task", "args": ["explain code", code_text, "code-summary"], "kwargs": {}}]}
-                    results = dispatch_tool(task_plan)
-                    output.print_agent_action("Task")
-                    output.print_tool_result("Task", results if isinstance(results, dict) else results[0])
-                    append_history(user_text, task_plan, results if isinstance(results, list) else [results])
-                    continue
-            except Exception:
-                pass
-
-        ok, plan_or_err = generate_plan(user_text, retries=1)
-        if not ok:
-            output.print_error(f"LLM plan generation failed: {plan_or_err}")
-            if isinstance(plan_or_err, str) and "Model output did not contain JSON" in plan_or_err:
-                output.print_assistant(
-                    "I couldn't turn that into an action. Try phrasing it as an instruction, "
-                    "like 'update test.py so x equals 9 and y equals 10'."
-                )
-            append_history(user_text, {"error": str(plan_or_err)}, [])
-            continue
-        plan = plan_or_err
-
-        if isinstance(plan, dict) and isinstance(plan.get("steps"), list) and len(plan.get("steps")) == 0:
-            explain = plan.get("explain", "").strip()
-            if explain:
-                output.print_assistant(explain)
-                append_history(user_text, plan, [])
-                continue
-
-        destructive = []
-        for i, s in enumerate(plan.get("steps", []), start=1):
-            tool_name = s.get("tool", "").lower() if isinstance(s, dict) else ""
-            if tool_name in destructive_tools:
-                destructive.append((i, s))
-
-        run_full_plan = True
-        if destructive:
-            output.print_boxed("Plan Summary (before execution)", plan.get("explain", "(no explain)"))
-            prompt_lines = ["Can I make these changes?"]
-            for idx, step in destructive:
-                prompt_lines.append(f"  {idx}. {step.get('tool')} args={step.get('args')}")
-            output.print_prompt("\n".join(prompt_lines), title="Confirm Changes")
-            ans = input("(y/n) ").strip().lower()
-            if ans not in ("y", "yes"):
-                run_full_plan = False
-
-        steps_to_run = plan.get("steps", [])
-        if not run_full_plan and destructive:
-            steps_to_run = [s for s in steps_to_run if not (isinstance(s, dict) and s.get("tool", "").lower() in destructive_tools)]
-            if not steps_to_run:
-                output.print_warning("No non-destructive steps to run. Skipping.", title="Plan")
-                append_history(user_text, plan, [])
-                continue
-            output.print_warning("Running non-destructive steps only (destructive skipped).", title="Plan")
-
-        plan_for_dispatch = {"steps": steps_to_run, "explain": plan.get("explain", "")}
-        results = dispatch_tool(plan_for_dispatch)
-
-        if isinstance(results, list):
-            for r in results:
-                tool_name = r.get("tool", "<unknown>")
-                output.print_agent_action(tool_name)
-                output.print_tool_result(tool_name, r)
-        else:
-            tool_name = results.get("tool", "<unknown>")
-            output.print_agent_action(tool_name)
-            output.print_tool_result(tool_name, results)
-
-        append_history(user_text, plan, results if isinstance(results, list) else [results])
+        # Run agentic loop
+        try:
+            print(f"\n{output.Color.TITLE}Starting task: {line}{output.Color.RESET}")
+            
+            state = agent.run(line, max_iterations=15)
+            
+            # Print summary
+            if state.completed:
+                # Extract summary from last observation if task_complete was called
+                summary = ""
+                for obs in reversed(state.conversation_history):
+                    if obs.get("type") == "tool_result" and obs.get("tool") == "task_complete":
+                        result = obs.get("result", {})
+                        if isinstance(result, dict):
+                            summary = result.get("output", "")
+                        break
+                
+                output.print_success(f"Task completed in {state.iterations} iterations")
+                if summary:
+                    print(f"\n{output.Color.BOLD}Summary:{output.Color.RESET}\n{summary}\n")
+            else:
+                error_msg = state.error or "Task incomplete"
+                output.print_warning(f"Task stopped after {state.iterations} iterations: {error_msg}")
+            
+            # Save to history
+            history_summary = {
+                "steps": [
+                    {"iteration": i, "summary": "agentic_loop"} 
+                    for i in range(state.iterations)
+                ],
+                "explain": f"Agentic loop completed in {state.iterations} iterations",
+                "completed": state.completed
+            }
+            append_history(line, history_summary, state.conversation_history)
+            
+        except Exception as e:
+            import traceback
+            output.print_error(f"Agentic loop error: {e}\n{traceback.format_exc()}")
+            append_history(line, {"error": str(e)}, [])

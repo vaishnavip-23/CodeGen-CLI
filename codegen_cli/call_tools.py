@@ -1,459 +1,327 @@
-# File Summary: Tool dispatcher that loads modules and routes tool invocations.
+# File Summary: Tool calling with agentic loop for iterative execution.
 
 """
-Tool dispatcher for CodeGen2 CLI agent.
+Tool calling and agentic loop for CodeGen CLI.
 
-Handles calling individual tool modules and provides safety checks for file operations.
+Implements iterative reasoning with Gemini function calling:
+- Agent sees tool results before deciding next action
+- Uses native Gemini function calling (no JSON parsing)
+- Self-corrects on failures
+- Maintains conversation history for context
 """
 
-import importlib
 import os
 import traceback
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
 
-def _load_tool_module(name: str):
-    """Load a tool module by name."""
-    try:
-        module = importlib.import_module(f"codegen_cli.tools.{name}")
-    except ModuleNotFoundError:
-        try:
-            module = importlib.import_module(f"codegen_cli.tools.{name.lower()}")
-        except Exception as e:
-            raise RuntimeError(f"Tool '{name}' not found.") from e
-    return module
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
 
-def _call_module_func_safe(module, args, kwargs):
-    """Safely call module.call with various argument patterns."""
-    last_exc = None
+from .tools_registry import get_all_function_declarations, get_tool_module
+
+
+@dataclass
+class AgentState:
+    """Tracks the agent's state during execution."""
+    goal: str
+    iterations: int = 0
+    max_iterations: int = 15
+    conversation_history: List[Dict[str, Any]] = field(default_factory=list)
+    completed: bool = False
+    error: Optional[str] = None
+    working_memory: Dict[str, Any] = field(default_factory=dict)
+    llm_messages: List[Any] = field(default_factory=list)  # Actual LLM conversation
     
-                                    
-    patterns = [
-        lambda: module.call(*args, **(kwargs or {})),
-        lambda: module.call(*args),
-        lambda: module.call(**kwargs) if kwargs else None,
-        lambda: module.call(args) if args else None,
-        lambda: module.call()
-    ]
+    def add_observation(self, tool: str, result: Any):
+        """Add a tool result to history."""
+        self.conversation_history.append({
+            "type": "tool_result",
+            "tool": tool,
+            "result": result,
+            "iteration": self.iterations
+        })
     
-    for pattern in patterns:
-        try:
-            result = pattern()
-            if result is not None:
-                return result
-        except TypeError as e:
-            last_exc = e
-        except Exception:
-                                             
-            raise
+    def add_thought(self, thought: str):
+        """Add agent's reasoning to history."""
+        self.conversation_history.append({
+            "type": "thought",
+            "content": thought,
+            "iteration": self.iterations
+        })
     
-    if last_exc:
-        raise last_exc
-    return None
+    def get_recent_context(self, limit: int = 5) -> str:
+        """Get recent history as formatted string."""
+        recent = self.conversation_history[-limit:]
+        lines = []
+        for item in recent:
+            if item["type"] == "thought":
+                lines.append(f"Thought: {item['content']}")
+            elif item["type"] == "tool_result":
+                lines.append(f"Tool: {item['tool']}")
+                lines.append(f"Result: {str(item['result'])[:200]}...")
+        return "\n".join(lines)
 
 
-def _execute_tool_call(tool_name: str, args, kwargs):
-    module = _load_tool_module(tool_name)
-    args = _normalize_args(tool_name, args, kwargs)
-
-                                    
-    if tool_name.lower() == "read":
-        result = _call_module_func_safe(module, args, kwargs)
-        if result and isinstance(result, dict) and not result.get("success", True):
-            retry_result = _glob_retry_read(module, args, kwargs)
-            if retry_result:
-                result = retry_result
+class AgenticLoop:
+    """Iterative agent that decides next action based on results."""
+    
+    def __init__(self, client, output_module=None):
+        """Initialize the agentic loop.
         
-        if result is None:
-            result = {
-                "tool": tool_name,
-                "success": False,
-                "output": "Tool returned None",
-                "args": args,
-                "kwargs": kwargs,
-            }
-        elif isinstance(result, dict):
-            result.setdefault("tool", tool_name)
-            result.setdefault("args", args)
-            result.setdefault("kwargs", kwargs)
+        Args:
+            client: Gemini API client
+            output_module: Output module for printing results
+        """
+        self.client = client
+        self.output = output_module
+        
+        # Get function declarations from all tools
+        if types:
+            self.function_declarations = get_all_function_declarations()
         else:
-            result = {
-                "tool": tool_name,
+            self.function_declarations = []
+    
+    def _build_agent_prompt(self, state: AgentState) -> str:
+        """Build prompt for next action decision."""
+        prompt_parts = []
+        
+        prompt_parts.append(f"""You are an iterative coding agent. Your goal is:
+{state.goal}
+
+You will accomplish this by deciding ONE action at a time, seeing the result, and then deciding the next action.
+
+IMPORTANT RULES:
+1. **For multi-step tasks (3+ steps)**: FIRST use manage_todos to break down the task into a checklist
+2. Choose ONE tool to call next (not a full plan)
+3. Use discovery tools (list_files, find_files, grep) before making changes
+4. Read files before editing them to understand context
+5. **Update todos**: After completing each subtask, call manage_todos(action="pop") to mark it done
+6. **When all todos are done**, call task_complete with your summary
+
+**For analysis tasks** (summarize, explain, analyze, find):
+- Create 3-5 todos for what to discover
+- Gather information 
+- Mark todos done as you go
+- When all todos complete, call task_complete with your synthesized findings
+
+**TODO WORKFLOW EXAMPLE**:
+- Task: "Update version in setup.py"
+- First: manage_todos(action="add", text="Find setup.py")
+- Then: manage_todos(action="add", text="Read current version")
+- Then: manage_todos(action="add", text="Update to new version")
+- Do work, calling manage_todos(action="pop") after each step
+- Finally: task_complete(summary="...")
+
+Current progress: iteration {state.iterations}/{state.max_iterations}
+""")
+        
+        # Add recent context if available
+        if state.conversation_history:
+            recent = state.get_recent_context(limit=5)
+            prompt_parts.append(f"\nRecent history:\n{recent}")
+        
+        # Add working memory
+        if state.working_memory:
+            memory_str = "\n".join(f"- {k}: {v}" for k, v in state.working_memory.items())
+            prompt_parts.append(f"\nWhat I know so far:\n{memory_str}")
+        
+        prompt_parts.append("\nWhat should I do next? Choose ONE tool to call.")
+        
+        return "\n".join(prompt_parts)
+    
+    def _call_llm_for_next_action(self, state: AgentState) -> Optional[Dict[str, Any]]:
+        """Call LLM to decide next action using function calling."""
+        
+        try:
+            # First iteration: send initial prompt
+            if state.iterations == 1:
+                prompt = self._build_agent_prompt(state)
+                state.llm_messages = [prompt]
+            
+            # Call LLM with conversation history
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=state.llm_messages,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(function_declarations=self.function_declarations)],
+                    temperature=0.1
+                )
+            )
+            
+            # Extract function call
+            if not response.candidates:
+                return None
+            
+            content = response.candidates[0].content
+            
+            # Add assistant response to conversation
+            state.llm_messages.append(content)
+            
+            # Check for function call
+            for part in content.parts:
+                if hasattr(part, 'function_call') and part.function_call:
+                    fc = part.function_call
+                    return {
+                        "tool": fc.name,
+                        "args": dict(fc.args) if fc.args else {}
+                    }
+                elif hasattr(part, 'text') and part.text:
+                    # Agent provided reasoning
+                    state.add_thought(part.text)
+            
+            return None
+            
+        except Exception as e:
+            if self.output:
+                self.output.print_error(f"LLM call failed: {e}\n{traceback.format_exc()}")
+            return None
+    
+    def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool and return result."""
+        if tool_name == "task_complete":
+            return {
+                "tool": "task_complete",
                 "success": True,
-                "output": result,
-                "args": args,
-                "kwargs": kwargs,
+                "output": args.get("summary", "Task completed"),
+                "complete": True
             }
-        return result
-
-    if tool_name.lower() == "write":
-        safe, error_msg = _check_write_safety(args, kwargs)
-        if not safe:
-            return {
-                "tool": tool_name,
-                "success": False,
-                "output": error_msg,
-                "args": args,
-                "kwargs": kwargs,
-            }
-
-    result = _call_module_func_safe(module, args, kwargs)
-    if result is None:
-        return {
-            "tool": tool_name,
-            "success": False,
-            "output": "Tool returned None",
-            "args": args,
-            "kwargs": kwargs,
-        }
-
-    if isinstance(result, dict):
-        result.setdefault("tool", tool_name)
-        result.setdefault("args", args)
-        result.setdefault("kwargs", kwargs)
-        return result
-
-    return {
-        "tool": tool_name,
-        "success": True,
-        "output": result,
-        "args": args,
-        "kwargs": kwargs,
-    }
-
-
-def _extract_args_kwargs_from_use(tool_name: str, use: Dict[str, Any]) -> Tuple[List[Any], Dict[str, Any]]:
-    args: List[Any] = []
-    kwargs: Dict[str, Any] = {}
-
-    if not isinstance(use, dict):
-        return args, kwargs
-
-    params = use.get("parameters")
-    if isinstance(params, dict):
-        if isinstance(params.get("args"), list):
-            args = list(params["args"])
-        if isinstance(params.get("kwargs"), dict):
-            kwargs = dict(params["kwargs"])
-        else:
-            for key, value in params.items():
-                if key in {"args", "kwargs"}:
-                    continue
-                kwargs[key] = value
-    elif isinstance(params, list):
-        args = list(params)
-
-    if "args" in use and isinstance(use["args"], list):
-        args = list(use["args"])
-    if "kwargs" in use and isinstance(use["kwargs"], dict):
-        kwargs = dict(use["kwargs"])
-
-                                                                               
-    lowered = tool_name.lower()
-    def _pop_first(keys):
-        for key in keys:
-            if key in kwargs:
-                value = kwargs.pop(key)
-                args.append(value)
-                return True
-        return False
-
-    if not args:
-        if lowered in {"read", "write", "edit", "delete", "ls", "python_run", "python_check"}:
-            if not _pop_first(["path", "file_path", "target", "directory"]):
-                _pop_first(["pattern"])
-        elif lowered == "glob":
-            _pop_first(["pattern", "glob"])
-        elif lowered == "grep":
-            _pop_first(["pattern"])
-
-    if lowered == "grep" and "path" not in kwargs:
-        if "path_pattern" in kwargs:
-            kwargs["path"] = kwargs.pop("path_pattern")
-
-    if lowered == "todowrite" and not args and "todos" in kwargs:
-        args.append(kwargs.pop("todos"))
-
-    return args, kwargs
-
-
-def _execute_parallel_tool(step: Dict[str, Any]):
-    tool_uses = step.get("tool_uses", [])
-    if not isinstance(tool_uses, list):
-        return {
-            "tool": step.get("tool", "multi_tool_use.parallel"),
-            "success": False,
-            "output": "tool_uses must be a list",
-            "args": [],
-            "kwargs": {},
-        }
-
-    aggregated_results = []
-    for use in tool_uses:
-        if not isinstance(use, dict):
-            aggregated_results.append({
-                "tool": "unknown",
-                "success": False,
-                "output": "Invalid tool specification",
-                "args": [],
-                "kwargs": {},
-            })
-            continue
-
-        raw_name = use.get("recipient_name") or use.get("tool")
-        if not raw_name:
-            aggregated_results.append({
-                "tool": "unknown",
-                "success": False,
-                "output": "Missing tool name",
-                "args": [],
-                "kwargs": {},
-            })
-            continue
-
-        tool_name = raw_name.split(".")[-1]
-        args, kwargs = _extract_args_kwargs_from_use(tool_name, use)
-        try:
-            result = _execute_tool_call(tool_name, args, kwargs)
-        except Exception as e:
-            result = {
-                "tool": tool_name,
-                "success": False,
-                "output": f"Tool execution failed: {e}\n{traceback.format_exc()}",
-                "args": args,
-                "kwargs": kwargs,
-            }
-        aggregated_results.append(result)
-
-    return {
-        "tool": step.get("tool", "multi_tool_use.parallel"),
-        "success": all(r.get("success", False) for r in aggregated_results),
-        "output": aggregated_results,
-        "args": [],
-        "kwargs": {},
-    }
-
-def _glob_retry_read(module, args, kwargs):
-    """Try to find file using glob and retry read."""
-    if not args:
-        return None
-    
-    target_path = args[0]
-    if not isinstance(target_path, str):
-        return None
-    
-                               
-    try:
-        glob_module = importlib.import_module("codegen_cli.tools.glob")
-        glob_result = glob_module.call(f"**/{target_path}")
-
-        if isinstance(glob_result, dict) and glob_result.get("success"):
-            output = glob_result.get("output")
-                                                                        
-            if isinstance(output, list) and output:
-                                             
-                new_args = [output[0]] + list(args[1:])
-                return _call_module_func_safe(module, new_args, kwargs)
-    except Exception:
-        pass
-    
-    return None
-
-def _check_write_safety(args, kwargs):
-    """Check if write operation is safe."""
-    if not args:
-        return True, None
-    
-    target_path = args[0]
-    if not isinstance(target_path, str):
-        return True, None
-    
-                          
-    try:
-        import os
-        if os.path.exists(target_path):
-            force = kwargs.get("force", False) if kwargs else False
-            if not force:
-                return False, f"File '{target_path}' already exists. Use Edit/MultiEdit to modify existing files, or set force=True to overwrite."
-    except Exception:
-        pass
-    
-    return True, None
-
-def _looks_like_path(token: str) -> bool:
-    """Heuristic to detect a path-like token from natural phrases."""
-    if not isinstance(token, str):
-        return False
-    t = token.strip().strip(",.!")
-    if not t:
-        return False
-    return "/" in t or "." in t or os.path.exists(t)
-
-def _normalize_args(tool_name: str, args, kwargs):
-    """Normalize arguments for certain tools when users type natural phrases.
-
-    Heuristics only; keeps original args if we can't confidently improve them.
-    """
-    if not isinstance(args, list):
-        return args
-    name = tool_name.lower()
-    stopwords = {"the", "a", "an", "file", "folder", "directory", "named", "called"}
-    linkers = {"with", "containing", "that", "says", "content", "text"}
-
-    tokens = [str(a) for a in args]
-    cleaned = [t.strip().strip(",.!") for t in tokens if t.strip()]
-
-                                            
-    def pick_path(cands):
-        for c in cands:
-            if _looks_like_path(c):
-                return c
-        for c in cands:
-            if "." in c:
-                return c
-        return cands[0] if cands else None
-
-    if name in ("delete", "read", "ls", "glob") and cleaned:
-        candidates = [c for c in cleaned if c.lower() not in stopwords]
-        path = pick_path(candidates)
-        if path:
-            return [path] + ([] if name in ("delete", "read") else cleaned[1:])
-                                                                                   
-        if name == "delete":
-            found = None
-            tokens = [c.lower() for c in candidates if c]
-            for dirpath, dirnames, filenames in os.walk(os.getcwd()):
-                dirnames[:] = [d for d in dirnames if not d.startswith('.')]
-                for fn in filenames:
-                    low = fn.lower()
-                    if any(t in low for t in tokens):
-                        found = os.path.relpath(os.path.join(dirpath, fn), os.getcwd())
-                        break
-                if found:
-                    break
-            if found:
-                if isinstance(kwargs, dict):
-                    kwargs.setdefault("suggested_path", found)
-                return args
-        return args
-
-    if name == "write" and cleaned:
-        candidates = [c for c in cleaned if c.lower() not in stopwords]
-        path = pick_path(candidates)
-        if path:
-                                                                             
-            remaining = [c for c in candidates if c != path and c.lower() not in linkers]
-            content = " ".join(remaining).strip()
-            return [path] + ([content] if content else [])
-        return args
-
-    if name == "edit":
-                                                                                            
-        return args
-
-    if name == "grep" and cleaned:
-                           
-        if "in" in [c.lower() for c in cleaned]:
-            idx = [c.lower() for c in cleaned].index("in")
-            pattern = " ".join(cleaned[:idx]).strip()
-            after = cleaned[idx+1:]
-            path = pick_path([c for c in after if c.lower() not in stopwords])
-            if pattern and path:
-                                                                                               
-                if isinstance(kwargs, dict):
-                    kwargs.setdefault("path", path)
-                return [pattern]
-        return args
-
-    return args
-
-def dispatch_tool(plan: Dict[str, Any]) -> Any:
-    """
-    Execute a tool plan and return results.
-    
-    Args:
-        plan: Dictionary with 'steps' containing list of tool calls
-        
-    Returns:
-        Single result dict or list of result dicts
-    """
-    if not isinstance(plan, dict):
-        return {"tool": "unknown", "success": False, "output": "Invalid plan format", "args": [], "kwargs": {}}
-    
-                                                                  
-    if "tool" in plan and isinstance(plan.get("tool"), str):
-        step = {
-            "tool": plan.get("tool"),
-            "args": plan.get("args", []),
-            "kwargs": plan.get("kwargs", {}),
-        }
-        if "tool_uses" in plan:
-            step["tool_uses"] = plan.get("tool_uses")
-        steps = [step]
-    else:
-        steps = plan.get("steps", [])
-    if not isinstance(steps, list):
-        return {"tool": "unknown", "success": False, "output": "Plan must contain steps list", "args": [], "kwargs": {}}
-    
-    if not steps:
-        return {"tool": plan.get("tool", "unknown"), "success": True, "output": "No steps to execute", "args": plan.get("args", []), "kwargs": plan.get("kwargs", {})}
-    
-    if len(steps) == 1:
-                     
-        step = steps[0]
-        if not isinstance(step, dict):
-            return {"tool": "unknown", "success": False, "output": "Step must be a dictionary", "args": [], "kwargs": {}}
-        
-        tool_name = step.get("tool", "unknown")
-        if tool_name.lower() == "multi_tool_use.parallel" or "tool_uses" in step:
-            return _execute_parallel_tool(step)
-
-        args = step.get("args", [])
-        kwargs = step.get("kwargs", {})
         
         try:
-            return _execute_tool_call(tool_name, args, kwargs)
+            # Get tool module and call its function
+            module = get_tool_module(tool_name)
+            
+            # Extract positional args if needed (for backwards compat)
+            # Most tools use kwargs now, but some may need positional
+            result = module.call(**args)
+            
+            # Ensure result has required fields
+            if not isinstance(result, dict):
+                result = {"success": True, "output": result}
+            
+            result.setdefault("tool", tool_name)
+            result.setdefault("success", True)
+            
+            return result
+            
         except Exception as e:
             return {
                 "tool": tool_name,
                 "success": False,
-                "output": f"Tool execution failed: {str(e)}\n{traceback.format_exc()}",
-                "args": args,
-                "kwargs": kwargs
+                "output": f"Tool execution error: {e}\n{traceback.format_exc()}"
             }
     
-    else:
-                        
-        results = []
-        for step in steps:
-            if not isinstance(step, dict):
-                results.append({
-                    "tool": "unknown",
-                    "success": False,
-                    "output": "Step must be a dictionary",
-                    "args": [],
-                    "kwargs": {}
-                })
-                continue
-            
-            tool_name = step.get("tool", "unknown")
+    def _should_reflect(self, result: Dict[str, Any]) -> bool:
+        """Decide if agent should reflect on result."""
+        # Reflect on failures or surprising results
+        if not result.get("success", False):
+            return True
+        return False
+    
+    def _reflection_prompt(self, tool_call: Dict[str, Any], result: Dict[str, Any]) -> str:
+        """Build reflection prompt."""
+        return f"""The last action didn't work as expected:
 
-            if tool_name.lower() == "multi_tool_use.parallel" or "tool_uses" in step:
-                results.append(_execute_parallel_tool(step))
-                continue
+Tool called: {tool_call.get('tool')}
+Arguments: {tool_call.get('args')}
+Result: {result}
 
-            args = step.get("args", [])
-            kwargs = step.get("kwargs", {})
+What went wrong? What should I try instead?
+Provide a brief analysis and suggest the next action."""
+    
+    def run(self, user_goal: str, max_iterations: int = 15) -> AgentState:
+        """Run the agentic loop until task complete or max iterations.
+        
+        Args:
+            user_goal: The user's natural language goal
+            max_iterations: Maximum number of iterations
             
-            try:
-                results.append(_execute_tool_call(tool_name, args, kwargs))
+        Returns:
+            Final AgentState with full history
+        """
+        state = AgentState(goal=user_goal, max_iterations=max_iterations)
+        
+        while state.iterations < state.max_iterations and not state.completed:
+            state.iterations += 1
+            
+            if self.output:
+                self.output.print_info(
+                    f"Iteration {state.iterations}/{state.max_iterations}",
+                    title="Agent Thinking"
+                )
+            
+            # Get next action from LLM
+            tool_call = self._call_llm_for_next_action(state)
+            
+            if tool_call is None:
+                state.error = "No tool call returned from LLM"
+                break
+            
+            tool_name = tool_call.get("tool")
+            tool_args = tool_call.get("args", {})
+            
+            if self.output:
+                self.output.print_agent_action(f"{tool_name}")
+            
+            # Execute tool
+            result = self._execute_tool(tool_name, tool_args)
+            
+            if self.output:
+                self.output.print_tool_result(tool_name, result)
+            
+            # Add function response to LLM conversation
+            output_str = str(result.get("output", ""))
+            if len(output_str) > 2000:  # Truncate large outputs
+                output_str = output_str[:2000] + "... (truncated)"
+            
+            function_response = types.Content(
+                parts=[
+                    types.Part.from_function_response(
+                        name=tool_name,
+                        response={"result": output_str}
+                    )
+                ],
+                role="user"
+            )
+            state.llm_messages.append(function_response)
+            
+            # Check if task complete
+            if result.get("complete") or tool_name == "task_complete":
+                state.completed = True
+                state.add_observation(tool_name, result)
+                break
+            
+            # Add to history
+            state.add_observation(tool_name, result)
+            
+            # Update working memory with important info
+            if tool_name == "grep" and result.get("success"):
+                files = result.get("output", [])
+                if isinstance(files, list) and files:
+                    state.working_memory["files_found"] = [
+                        f.get("file") if isinstance(f, dict) else f 
+                        for f in files[:5]
+                    ]
+            
+            # Reflection on failures
+            if self._should_reflect(result):
+                if self.output:
+                    self.output.print_warning("Tool failed, agent will reflect and retry")
                 
-            except Exception as e:
-                results.append({
-                    "tool": tool_name,
-                    "success": False,
-                    "output": f"Tool execution failed: {str(e)}\n{traceback.format_exc()}",
-                    "args": args,
-                    "kwargs": kwargs
-                })
+                # Give agent a chance to analyze and retry
+                reflection_prompt = self._reflection_prompt(tool_call, result)
+                state.add_thought(reflection_prompt)
         
-        return results
+        if state.iterations >= state.max_iterations and not state.completed:
+            state.error = "Max iterations reached without completion"
+        
+        return state
+
+
+def create_agentic_loop(client, output_module=None) -> AgenticLoop:
+    """Factory function to create an agentic loop."""
+    return AgenticLoop(client, output_module)

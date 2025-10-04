@@ -158,14 +158,13 @@ def _print_panel(title: str, content: str, style: str = "info") -> None:
                        
                              
 def print_user_input(text: str):
-    """Display user input in a styled panel."""
-    _print_panel("User", text, style="input")
+    """Display user input - COMPACT."""
+    print(f"\n{Color.HEADER}> {text}{Color.RESET}")
 
 
 def print_agent_action(tool_name: str):
-    """Display agent tool usage."""
-    message = f"Using tool: {Color.TOOL}{tool_name}{Color.RESET}"
-    _print_panel("Agent", message, style="action")
+    """Display agent tool usage - COMPACT."""
+    print(f"{Color.TOOL}→ {tool_name}{Color.RESET}", end="", flush=True)
 
 
 def print_boxed(title: str, content: str, *, style: str = "info"):
@@ -174,28 +173,28 @@ def print_boxed(title: str, content: str, *, style: str = "info"):
 
 
 def print_error(message: str):
-    """Display error message in a red box."""
-    _print_panel("Error", message, style="error")
+    """Display error message - COMPACT."""
+    print(f"\n{Color.ERROR}✗ Error: {message}{Color.RESET}")
 
 
 def print_info(message: str, *, title: str = "Info"):
-    """Display informational text in standard styling."""
-    _print_panel(title, message, style="info")
+    """Display informational text - COMPACT."""
+    print(f"\n{Color.TITLE}[{message}]{Color.RESET}")
 
 
 def print_success(message: str, *, title: str = "Success"):
-    """Display success feedback."""
-    _print_panel(title, message, style="success")
+    """Display success feedback - COMPACT."""
+    print(f"\n{Color.SUCCESS}✓ {message}{Color.RESET}")
 
 
 def print_warning(message: str, *, title: str = "Warning"):
-    """Display warnings or cautionary notes."""
-    _print_panel(title, message, style="warning")
+    """Display warnings - COMPACT."""
+    print(f"\n{Color.KEYWORD}⚠ {message}{Color.RESET}")
 
 
 def print_assistant(message: str, *, title: str = "Assistant"):
-    """Display assistant chat responses."""
-    _print_panel(title, message, style="assistant")
+    """Display assistant chat responses - COMPACT."""
+    print(f"\n{Color.BOLD}{message}{Color.RESET}")
 
 
 def print_prompt(message: str, *, title: str = "Confirm"):
@@ -385,50 +384,45 @@ def _looks_like_code(text: str) -> bool:
 
 
 def print_tool_result(tool_name: str, result: Dict[str, Any]):
-    """Display tool execution result in a styled panel."""
+    """Display tool execution result - COMPACT VERSION."""
     success = bool(result.get("success", False))
-    style = "success" if success else "error"
-    status_label = "OK" if success else "ERROR"
+    status = "✓" if success else "✗"
     status_color = Color.SUCCESS if success else Color.ERROR
-    status_line = f"{status_color}Status: {status_label}{Color.RESET}"
-
-    content_blocks: List[str] = [status_line]
-
-    message = result.get("message")
-    if isinstance(message, str) and message.strip():
-        content_blocks.append(message.strip())
-
-    if not success and result.get("error"):
-        content_blocks.append(str(result["error"]))
-
+    
+    # Compact output: tool_name [status] + brief result
+    print(f"\n{status_color}{status} {tool_name}{Color.RESET}", end="")
+    
     output_data = result.get("output")
-
-    if tool_name.lower() == "task" and isinstance(output_data, dict):
-        task_lines = _task_summary_lines(output_data)
-        if task_lines:
-            content_blocks.append("\n".join(task_lines))
-    elif isinstance(output_data, (dict, list)):
-        try:
-            content_blocks.append(json.dumps(output_data, indent=2))
-        except Exception:
-            content_blocks.append(str(output_data))
+    
+    # Special handling for todos
+    if tool_name == "manage_todos" and isinstance(output_data, list):
+        print(f" → {len(output_data)} todos")
+        for todo in output_data:
+            if isinstance(todo, dict):
+                status_icon = "✓" if todo.get("status") == "completed" else "☐" if todo.get("status") == "pending" else "►"
+                content = todo.get("content", str(todo))
+                print(f"  {status_icon} {content}")
+        return
+    
+    # Show compact result
+    if isinstance(output_data, list):
+        count = len(output_data)
+        print(f" → {count} items")
+        if count > 0 and count <= 5:
+            for item in output_data[:5]:
+                item_str = str(item) if not isinstance(item, dict) else item.get("file", str(item))
+                print(f"  • {item_str[:80]}")
+    elif isinstance(output_data, dict):
+        print(f" → {len(output_data)} keys")
     elif isinstance(output_data, str):
-        text = output_data.strip("\n")
-        if _looks_like_code(text):
-            code_block = "\n".join([
-                f"{Color.CODE}```python{Color.RESET}",
-                _format_code_content(text),
-                f"{Color.CODE}```{Color.RESET}",
-            ])
-            content_blocks.append(code_block)
-        elif text:
-            content_blocks.append(text)
+        preview = output_data[:200].replace('\n', ' ')
+        print(f" → {preview}...")
     elif output_data is not None:
-        content_blocks.append(str(output_data))
-
-    title = f"{tool_name} • {status_label}"
-    body = "\n\n".join(block for block in content_blocks if block)
-    print_boxed(title, body if body else status_line, style=style)
+        print(f" → {str(output_data)[:100]}")
+    else:
+        msg = result.get("message", "")
+        if msg:
+            print(f" → {msg[:100]}")
 
                              
                                            
