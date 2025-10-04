@@ -194,3 +194,4 @@ MANIFEST.in
 setup.py
 uv.lock
 .python-version
+PyPI guide.txt
