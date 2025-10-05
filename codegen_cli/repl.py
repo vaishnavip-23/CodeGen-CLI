@@ -157,9 +157,16 @@ def run_repl(deps: Dict[str, Any]) -> None:
 
         # Run agentic loop
         try:
+            # Clear todos at start of each new task for fresh slate
+            from .tools.todowrite import clear_todos
+            clear_todos()
+            
             print(f"\n{output.Color.TITLE}Starting task: {line}{output.Color.RESET}")
             
-            state = agent.run(line, max_iterations=15)
+            # Max iterations = max API calls = max cost
+            # Simple: 2-4, Analysis: 3-5, Modification: 10-30, Massive: 30-50
+            # 50 iterations at $0.075/1M tokens ≈ $0.0075 (0.75 cents)
+            state = agent.run(line, max_iterations=50)
             
             # Print summary
             if state.completed:

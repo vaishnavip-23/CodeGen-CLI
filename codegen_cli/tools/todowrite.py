@@ -55,21 +55,35 @@ def get_function_declaration():
     
     return types.FunctionDeclaration(
         name=FUNCTION_DECLARATION["name"],
-        description="Manage todo list - add tasks, mark done (pop), list, or clear. Use this to organize multi-step work.",
+        description="""Manage todo list for MODIFICATION tasks only (8+ files). 
+
+CRITICAL: ONLY use for multi-file MODIFICATION tasks. NEVER for analysis/reading tasks.
+
+For multiple todos: Use 'todos' parameter with full array (BATCH mode - 1 API call).
+For single todo: Use 'action=add' with text.
+
+Batch example (PREFERRED for 8+ items):
+manage_todos(todos=[
+  {"id":"1", "content":"Update file1.py", "status":"pending"},
+  {"id":"2", "content":"Update file2.py", "status":"pending"}
+])
+
+Single todo example (for 1-2 items only):
+manage_todos(action="add", text="Update config.py")""",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "action": types.Schema(type=types.Type.STRING, description="Action: 'add' (create todo), 'list' (show all), 'pop' (mark first todo done), 'clear' (remove all)"),
-                "text": types.Schema(type=types.Type.STRING, description="REQUIRED when action='add'. The todo task description. Example: 'Read main.py file'"),
+                "action": types.Schema(type=types.Type.STRING, description="Action: 'add' (create single todo), 'list' (show all), 'pop' (mark first done), 'clear' (remove all). For 8+ todos, use 'todos' parameter instead."),
+                "text": types.Schema(type=types.Type.STRING, description="REQUIRED when action='add'. The todo task description."),
                 "todos": types.Schema(
                     type=types.Type.ARRAY,
-                    description="Full list of todos",
+                    description="BATCH MODE: Create multiple todos at once (PREFERRED for 8+ files). Saves API calls! Array of todo objects.",
                     items=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
-                            "id": types.Schema(type=types.Type.STRING),
-                            "content": types.Schema(type=types.Type.STRING),
-                            "status": types.Schema(type=types.Type.STRING)
+                            "id": types.Schema(type=types.Type.STRING, description="Unique ID"),
+                            "content": types.Schema(type=types.Type.STRING, description="Todo description"),
+                            "status": types.Schema(type=types.Type.STRING, description="Status: pending, in_progress, or completed")
                         }
                     )
                 )
@@ -149,6 +163,17 @@ def add_todo(text: str) -> Dict[str, Any]:
         }
     
     todos = read_todos()
+    text_normalized = text.strip().lower()
+    
+    # Check for duplicates (case-insensitive)
+    for existing in todos:
+        if existing.get("content", "").strip().lower() == text_normalized:
+            return {
+                "tool": "todowrite",
+                "success": True,
+                "output": todos  # Return existing list without adding duplicate
+            }
+    
     new_todo = {
         "id": str(len(todos) + 1),
         "content": text.strip(),
