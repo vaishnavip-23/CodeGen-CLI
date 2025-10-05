@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # File Summary: Primary application bootstrap handling environment setup and REPL startup.
 
+
 """
 CodeGen-CLI - Universal Coding Agent
 
@@ -184,7 +185,7 @@ def _check_update():
 WORKSPACE_ROOT = os.getcwd()
                                                                     
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
-SYSTEM_PROMPT_PATH = os.path.join(PACKAGE_DIR, "config", "system_prompt.txt")
+SYSTEM_PROMPT_PATH = os.path.join(PACKAGE_DIR, "config", "system_prompt.md")
 BEHAVIOR_PATH = os.path.join(PACKAGE_DIR, "config", "behavior.md")
 
                                                                                

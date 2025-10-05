@@ -13,6 +13,7 @@ import textwrap
 from typing import Any, Dict
 
 from .call_tools import create_agentic_loop
+from .conversation_memory import ConversationMemory
 
 
 def _prompt_user_input_box(output_module) -> str:
@@ -121,8 +122,11 @@ def run_repl(deps: Dict[str, Any]) -> None:
         output.print_error("Failed to initialize Gemini client. Check your API key.")
         return
 
+    # Initialize conversation memory (maintains context across tasks)
+    conversation_memory = ConversationMemory(max_tasks=10)
+    
     # Initialize agentic loop (tools are loaded automatically from registry)
-    agent = create_agentic_loop(client, output)
+    agent = create_agentic_loop(client, output, conversation_memory)
 
     _print_intro(workspace_root, project_info, bool(os.environ.get("GEMINI_API_KEY")), output)
 
@@ -185,6 +189,10 @@ def run_repl(deps: Dict[str, Any]) -> None:
             else:
                 error_msg = state.error or "Task incomplete"
                 output.print_warning(f"Task stopped after {state.iterations} iterations: {error_msg}")
+            
+            # Extract and save task memory for conversation continuity
+            task_memory = conversation_memory.extract_from_state(line, state)
+            conversation_memory.add_task(task_memory)
             
             # Save to history
             history_summary = {

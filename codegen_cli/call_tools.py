@@ -80,16 +80,18 @@ class AgenticLoop:
         "gemini-2.5-pro"             # LAST RESORT: Very expensive! $1.25/$10.00, 150 RPM, 2M TPM, 10K RPD
     ]
     
-    def __init__(self, client, output_module=None):
+    def __init__(self, client, output_module=None, conversation_memory=None):
         """Initialize the agentic loop.
         
         Args:
             client: Gemini API client
             output_module: Output module for printing results
+            conversation_memory: ConversationMemory instance for cross-task context
         """
         self.client = client
         self.output = output_module
         self.current_model_index = 0  # Track which model we're using
+        self.conversation_memory = conversation_memory
         
         # Get function declarations from all tools
         if types:
@@ -114,6 +116,13 @@ class AgenticLoop:
     def _build_agent_prompt(self, state: AgentState) -> str:
         """Build prompt for next action decision."""
         prompt_parts = []
+        
+        # Add conversation memory if available (cross-task context)
+        if self.conversation_memory:
+            context = self.conversation_memory.get_recent_context(limit=5)
+            if context:
+                prompt_parts.append(context)
+                prompt_parts.append("\n---\n")
         
         prompt_parts.append(f"""You are an iterative coding agent. Your goal is:
 {state.goal}
@@ -141,6 +150,11 @@ IMPORTANT RULES:
 - Then: manage_todos(action="add", text="Update to new version")
 - Do work, calling manage_todos(action="pop") after each step
 - Finally: task_complete(summary="...")
+
+**IMPORTANT - USE CONVERSATION MEMORY**:
+- When the user says "that file", "the comment", "that function" - refer to the conversation history above
+- If we just created/modified a file, subsequent vague references likely refer to that file
+- Use context clues from previous tasks to understand ambiguous requests
 
 Current progress: iteration {state.iterations}/{state.max_iterations}
 """)
@@ -466,6 +480,6 @@ Provide a brief analysis and suggest the next action."""
         return state
 
 
-def create_agentic_loop(client, output_module=None) -> AgenticLoop:
+def create_agentic_loop(client, output_module=None, conversation_memory=None) -> AgenticLoop:
     """Factory function to create an agentic loop."""
-    return AgenticLoop(client, output_module)
+    return AgenticLoop(client, output_module, conversation_memory)

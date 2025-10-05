@@ -69,11 +69,45 @@ Next: read_file("config.py")
 
 ## 5. Working Memory & Context
 
-The agent maintains context across iterations:
+The agent maintains two levels of context:
+
+### Within a Task (Iterations)
 - **Recent observations**: Results from last few tools
 - **Discovered files**: Paths found during search
 - **Current understanding**: What's known about the codebase
 - **Remaining work**: What still needs to be done
+
+### Across Tasks (Conversation Memory - NEW!)
+Like Claude Code, the agent remembers previous tasks in the session:
+- **Last 10 completed tasks**: User requests and outcomes
+- **Files created/modified**: All files touched during the session
+- **Task summaries**: Brief descriptions of what was accomplished
+- **Key outcomes**: Important results from each task
+
+**This enables natural follow-up requests:**
+```
+Task 1: "create test.py with a hello function"
+Result: Created test.py with hello() function
+
+Task 2: "add a docstring to that function"
+Agent thinks: "that function" = hello() in test.py [from conversation memory]
+Result: Added docstring to hello() in test.py
+
+Task 3: "move it to line 2"
+Agent thinks: "it" = the docstring we just added to test.py
+Result: Moved docstring to line 2
+```
+
+**When to use conversation memory:**
+- User says "that file", "the comment", "that function", "it"
+- User references something from a previous task without naming it
+- Context from recent work makes the request unambiguous
+- Follow-up modifications to files you just created/edited
+
+**When NOT to assume:**
+- User explicitly names a different file
+- The reference is genuinely unclear even with history
+- Multiple files could match the description
 
 Use this context to make informed decisions about the next action.
 

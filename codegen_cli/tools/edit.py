@@ -123,6 +123,10 @@ def call(path: str, *args, **kwargs) -> dict:
             "output": f"File not found: {path}"
         }
     
+    # Check syntax BEFORE editing to detect pre-existing errors
+    pre_edit_syntax = _check_python_syntax(full_path) if not skip_check else {"checked": False}
+    has_pre_existing_errors = pre_edit_syntax.get("checked") and not pre_edit_syntax.get("ok", True)
+    
     try:
         with open(full_path, "r", encoding="utf-8", errors="replace") as file:
             original_content = file.read()
@@ -132,17 +136,28 @@ def call(path: str, *args, **kwargs) -> dict:
             with open(full_path, "w", encoding="utf-8") as file:
                 file.write(new_string)
             rel_path = os.path.relpath(full_path, WORKSPACE)
-            report = _check_python_syntax(full_path) if not skip_check else {"checked": False}
+            
+            # Skip post-edit check if there were pre-existing errors
+            should_check_post = not skip_check and not has_pre_existing_errors
+            report = _check_python_syntax(full_path) if should_check_post else {"checked": False}
+            
             if report.get("checked") and not report.get("ok", True):
                 return {
                     "success": False,
                     "output": f"Edited {rel_path}, but syntax errors detected.",
                     "errors": report,
                 }
+            
+            # Success message with warning if pre-existing errors
+            output = f"Edited {rel_path}"
+            if has_pre_existing_errors:
+                output += " (Note: File had pre-existing syntax errors. Consider rewriting the entire file with valid Python code using write_file tool.)"
+            
             return {
                 "success": True,
-                "output": f"Edited {rel_path}",
+                "output": output,
                 "python_check": report if report.get("checked") else None,
+                "had_pre_existing_errors": has_pre_existing_errors,
             }
 
         if old_string not in original_content:
@@ -157,9 +172,16 @@ def call(path: str, *args, **kwargs) -> dict:
                         with open(full_path, "w", encoding="utf-8") as file:
                             file.write(new_content)
                         rel_path = os.path.relpath(full_path, WORKSPACE)
+                        
+                        # Success message with warning if pre-existing errors
+                        output = f"Edited {rel_path}"
+                        if has_pre_existing_errors:
+                            output += " (Note: File had pre-existing syntax errors. Consider rewriting the entire file with valid Python code using write_file tool.)"
+                        
                         return {
                             "success": True,
-                            "output": f"Edited {rel_path}"
+                            "output": output,
+                            "had_pre_existing_errors": has_pre_existing_errors,
                         }
             return {
                 "success": False, 
@@ -175,17 +197,28 @@ def call(path: str, *args, **kwargs) -> dict:
             file.write(new_content)
         
         rel_path = os.path.relpath(full_path, WORKSPACE)
-        report = _check_python_syntax(full_path) if not skip_check else {"checked": False}
+        
+        # Skip post-edit check if there were pre-existing errors
+        should_check_post = not skip_check and not has_pre_existing_errors
+        report = _check_python_syntax(full_path) if should_check_post else {"checked": False}
+        
         if report.get("checked") and not report.get("ok", True):
             return {
                 "success": False,
                 "output": f"Edited {rel_path}, but syntax errors detected.",
                 "errors": report,
             }
+        
+        # Success message with warning if pre-existing errors
+        output = f"Edited {rel_path}"
+        if has_pre_existing_errors:
+            output += " (Note: File had pre-existing syntax errors. Consider rewriting the entire file with valid Python code using write_file tool.)"
+        
         return {
             "success": True,
-            "output": f"Edited {rel_path}",
+            "output": output,
             "python_check": report if report.get("checked") else None,
+            "had_pre_existing_errors": has_pre_existing_errors,
         }
         
     except Exception as e:
