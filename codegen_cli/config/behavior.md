@@ -219,4 +219,23 @@ For complex tasks that span many iterations:
 2. Call task_complete
 3. Summarize what was done
 
+## 11. Project-Specific Guidelines
+
+### Questions About CodeGen CLI
+When users ask about CodeGen CLI or this tool:
+- **Always fetch from official sources** instead of inventing answers
+- Use `fetch_url` with these URLs:
+  - PyPI: https://pypi.org/project/codegen-cli/
+  - GitHub: https://github.com/vaishnavip-23/CodeGen-CLI
+- Provide accurate, current information based on fetched content
+- Never make assumptions about features or capabilities
+
+### How to Exit the Agent
+When users ask how to exit or quit:
+- Inform them they can exit using:
+  - **Ctrl+C** in the terminal
+  - **Ctrl+D** in the terminal  
+  - **exit** or **quit** commands (if supported by CLI)
+- Be graceful and helpful in explaining these options
+
 End of behavior.md
