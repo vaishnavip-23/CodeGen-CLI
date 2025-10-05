@@ -212,7 +212,6 @@ def detect_project_type(workspace_path: str) -> dict:
         "file_extensions": set()
     }
     
-                                 
     language_patterns = {
         'python': {
             'files': ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile'],
@@ -221,8 +220,13 @@ def detect_project_type(workspace_path: str) -> dict:
         },
         'javascript': {
             'files': ['package.json', 'yarn.lock', 'package-lock.json'],
-            'extensions': ['.js', '.jsx', '.ts', '.tsx', '.mjs'],
-            'dirs': ['node_modules', '.next', '.nuxt']
+            'extensions': ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'],
+            'dirs': ['node_modules', '.next', '.nuxt', 'dist', 'build']
+        },
+        'typescript': {
+            'files': ['tsconfig.json', 'package.json'],
+            'extensions': ['.ts', '.tsx'],
+            'dirs': ['node_modules', 'dist']
         },
         'go': {
             'files': ['go.mod', 'go.sum'],
@@ -233,32 +237,130 @@ def detect_project_type(workspace_path: str) -> dict:
             'files': ['Cargo.toml', 'Cargo.lock'],
             'extensions': ['.rs'],
             'dirs': ['target']
+        },
+        'java': {
+            'files': ['pom.xml', 'build.gradle', 'build.gradle.kts'],
+            'extensions': ['.java'],
+            'dirs': ['target', 'build']
         }
     }
     
-                     
+    # Helper to check if file exists in workspace or immediate subdirectories
+    def find_file(filename):
+        # Check root
+        if os.path.exists(os.path.join(workspace_path, filename)):
+            return True
+        # Check immediate subdirectories (one level deep)
+        try:
+            for item in os.listdir(workspace_path):
+                subdir = os.path.join(workspace_path, item)
+                if os.path.isdir(subdir) and not item.startswith('.'):
+                    if os.path.exists(os.path.join(subdir, filename)):
+                        return True
+        except (PermissionError, OSError):
+            pass
+        return False
+    
+    # Check for language-specific files
     for language, patterns in language_patterns.items():
         for file_pattern in patterns['files']:
-            if os.path.exists(os.path.join(workspace_path, file_pattern)):
+            if find_file(file_pattern):
                 project_info['language'] = language
                 project_info['file_extensions'] = set(patterns['extensions'])
                 break
         if project_info['language'] != 'unknown':
             break
     
-                            
+    # Detect framework if JavaScript/TypeScript
+    if project_info['language'] in ['javascript', 'typescript']:
+        package_json_path = os.path.join(workspace_path, 'package.json')
+        if not os.path.exists(package_json_path):
+            # Check subdirectories
+            try:
+                for item in os.listdir(workspace_path):
+                    subdir = os.path.join(workspace_path, item)
+                    if os.path.isdir(subdir) and not item.startswith('.'):
+                        sub_package = os.path.join(subdir, 'package.json')
+                        if os.path.exists(sub_package):
+                            package_json_path = sub_package
+                            break
+            except (PermissionError, OSError):
+                pass
+        
+        # Read package.json to detect framework
+        try:
+            import json
+            with open(package_json_path, 'r', encoding='utf-8') as f:
+                pkg_data = json.load(f)
+                deps = {**pkg_data.get('dependencies', {}), **pkg_data.get('devDependencies', {})}
+                
+                if 'react' in deps:
+                    project_info['framework'] = 'react'
+                elif 'vue' in deps:
+                    project_info['framework'] = 'vue'
+                elif 'next' in deps:
+                    project_info['framework'] = 'next.js'
+                elif '@angular/core' in deps:
+                    project_info['framework'] = 'angular'
+                elif 'svelte' in deps:
+                    project_info['framework'] = 'svelte'
+        except (FileNotFoundError, json.JSONDecodeError, Exception):
+            pass
+    
+    # Detect package manager
     if project_info['language'] == 'python':
-        if os.path.exists(os.path.join(workspace_path, 'requirements.txt')):
+        if find_file('requirements.txt'):
             project_info['package_manager'] = 'pip'
-        elif os.path.exists(os.path.join(workspace_path, 'pyproject.toml')):
+        elif find_file('pyproject.toml'):
             project_info['package_manager'] = 'poetry'
-        elif os.path.exists(os.path.join(workspace_path, 'Pipfile')):
+        elif find_file('Pipfile'):
             project_info['package_manager'] = 'pipenv'
-    elif project_info['language'] == 'javascript':
-        if os.path.exists(os.path.join(workspace_path, 'package.json')):
-            project_info['package_manager'] = 'npm'
-        if os.path.exists(os.path.join(workspace_path, 'yarn.lock')):
+    elif project_info['language'] in ['javascript', 'typescript']:
+        if find_file('yarn.lock'):
             project_info['package_manager'] = 'yarn'
+        elif find_file('pnpm-lock.yaml'):
+            project_info['package_manager'] = 'pnpm'
+        elif find_file('package-lock.json'):
+            project_info['package_manager'] = 'npm'
+        elif find_file('package.json'):
+            project_info['package_manager'] = 'npm'
+    
+    # Fallback: scan for common file extensions if still unknown
+    if project_info['language'] == 'unknown':
+        try:
+            ext_counts = {}
+            for root, dirs, files in os.walk(workspace_path):
+                # Skip hidden and common ignored directories
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv', 'target', 'build', 'dist']]
+                
+                for file in files:
+                    if file.startswith('.'):
+                        continue
+                    _, ext = os.path.splitext(file)
+                    if ext:
+                        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+                
+                # Only scan first 100 files for performance
+                if sum(ext_counts.values()) > 100:
+                    break
+            
+            # Determine language by most common extension
+            if ext_counts:
+                top_ext = max(ext_counts, key=ext_counts.get)
+                if top_ext in ['.py', '.pyi']:
+                    project_info['language'] = 'python'
+                elif top_ext in ['.js', '.jsx', '.mjs', '.cjs']:
+                    project_info['language'] = 'javascript'
+                elif top_ext in ['.ts', '.tsx']:
+                    project_info['language'] = 'typescript'
+                elif top_ext in ['.go']:
+                    project_info['language'] = 'go'
+                elif top_ext in ['.rs']:
+                    project_info['language'] = 'rust'
+                elif top_ext in ['.java']:
+                    project_info['language'] = 'java'
+        except Exception:
+            pass
     
     return project_info
 

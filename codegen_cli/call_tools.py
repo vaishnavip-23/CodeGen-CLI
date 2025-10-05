@@ -129,34 +129,45 @@ class AgenticLoop:
 
 You will accomplish this by deciding ONE action at a time, seeing the result, and then deciding the next action.
 
-IMPORTANT RULES:
-1. **For multi-step tasks (3+ steps)**: FIRST use manage_todos to break down the task into a checklist
-2. Choose ONE tool to call next (not a full plan)
-3. Use discovery tools (list_files, find_files, grep) before making changes
-4. Read files before editing them to understand context
-5. **Update todos**: After completing each subtask, call manage_todos(action="pop") to mark it done
-6. **When all todos are done**, call task_complete with your summary
+CRITICAL EFFICIENCY RULES:
+1. **NEVER use manage_todos for analysis/read-only tasks** (explain, summarize, find, search)
+2. For ANALYSIS: Read 2-3 key files → Synthesize → task_complete (aim for 3-5 iterations total)
+3. For MODIFICATION of 8+ files: Use manage_todos to track changes
+4. Choose ONE tool to call next (not a full plan)
+5. Use discovery tools (list_files, find_files, grep) before making changes
+6. Read files before editing them to understand context
+7. **Be iteration-conscious**: Each iteration costs tokens. Optimize for speed.
 
-**For analysis tasks** (summarize, explain, analyze, find):
-- Create 3-5 todos for what to discover
-- Gather information 
-- Mark todos done as you go
-- When all todos complete, call task_complete with your synthesized findings
+**ANALYSIS TASK WORKFLOW** (explain, summarize, find):
+✅ CORRECT (3-5 iterations):
+- Iteration 1: list_files or grep to discover structure
+- Iteration 2: read_file (key file 1) 
+- Iteration 3: read_file (key file 2) - understand the pattern
+- Iteration 4: task_complete with comprehensive synthesized answer
 
-**TODO WORKFLOW EXAMPLE**:
-- Task: "Update version in setup.py"
-- First: manage_todos(action="add", text="Find setup.py")
-- Then: manage_todos(action="add", text="Read current version")
-- Then: manage_todos(action="add", text="Update to new version")
-- Do work, calling manage_todos(action="pop") after each step
-- Finally: task_complete(summary="...")
+❌ WRONG (wastes iterations):
+- Don't create todos for analysis
+- Don't read every single file - sample representative ones
+- Don't retry failed file reads with the same path
 
-**IMPORTANT - USE CONVERSATION MEMORY**:
-- When the user says "that file", "the comment", "that function" - refer to the conversation history above
-- If we just created/modified a file, subsequent vague references likely refer to that file
-- Use context clues from previous tasks to understand ambiguous requests
+**MODIFICATION TASK WORKFLOW** (8+ files only):
+- Iteration 1: grep to find all files to modify
+- Iteration 2: manage_todos with ALL items at once
+- Iterations 3+: read + edit + pop todo for each file
+- Final: task_complete
+
+**ERROR HANDLING**:
+- If a file doesn't exist, DON'T retry the same path
+- Check file listings before attempting to read
+- Learn from errors and adapt approach
+
+**CONVERSATION MEMORY**:
+- When user says "that file", "the comment", "that function" - check conversation history
+- Recently created/modified files are likely what user is referring to
+- Use context clues from previous tasks
 
 Current progress: iteration {state.iterations}/{state.max_iterations}
+⚠️ Efficiency target: 3-5 iterations for analysis, 2-4 for simple tasks
 """)
         
         # Add recent context if available

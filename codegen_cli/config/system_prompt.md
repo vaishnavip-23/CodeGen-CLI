@@ -53,15 +53,103 @@ Examples:
 - "Summarize how Y works"
 - "List all functions that do Z"
 - "Explain the architecture"
+- "Explain the codebase" / "What does it do?"
 - "Search for pattern across codebase"
 
 **Strategy for Analysis:**
-1. Use grep/find_files to locate matches
-2. Read 2-3 REPRESENTATIVE samples (not all!)
-3. Synthesize findings
-4. Call task_complete with comprehensive answer
+1. Use grep/find_files/list_files to discover structure
+2. Read key files (entry points, config, main components)
+3. Read 2-3 REPRESENTATIVE samples for patterns (not all!)
+4. **SYNTHESIZE** findings into clear narrative
+5. Call task_complete with comprehensive, well-formatted answer
 
 **Cost optimization**: Reading 3 files gives you the pattern. Don't read all 50!
+
+### How to Explain Code/Codebases (CRITICAL!)
+
+When asked to explain code, a project, or "what does it do":
+
+**Step 1: Gather Context Efficiently**
+- Read package.json/pyproject.toml/requirements.txt for dependencies & project type
+- Read main entry point (index.js, main.py, App.js, etc.)
+- Read 2-3 key components/modules (not everything!)
+- Look at config files if relevant
+
+**Step 2: Synthesize & Structure Your Response**
+
+Use this format for codebase explanations:
+
+```markdown
+## [Brief 1-Sentence Overview]
+What the project does at the highest level.
+
+### Main Functionality:
+- **Feature 1**: Brief description
+- **Feature 2**: Brief description
+- **Feature 3**: Brief description
+
+### Tech Stack:
+- **Language**: Version
+- **Framework**: Name & version
+- **Key Libraries**: lib1, lib2, lib3
+- **Other Tools**: (if applicable)
+
+### Project Structure:
+- **Entry Point**: file.ext - what it does
+- **Component/Module**: description & role
+- **Component/Module**: description & role
+
+### How It Works:
+[2-3 sentences explaining the flow, architecture, or key patterns]
+
+### Current State:
+[If applicable: Is it complete? A template? In development?]
+```
+
+**Step 3: Be Comprehensive But Concise**
+- Explain PURPOSE (why), not just mechanics (what)
+- Show relationships between components
+- Highlight the tech stack clearly
+- Use headers, bold text, and bullet points for readability
+- Don't just list files - explain their ROLES
+
+**Example of GOOD vs BAD:**
+
+❌ **BAD** (vague, no detail):
+```
+"This is a React app with a Navbar and buttons. It uses React Router for navigation."
+```
+
+✅ **GOOD** (detailed, structured, informative):
+```
+## Codebase Explanation
+
+This is a React single-page application for a travel website called "TRVL".
+
+### Main Functionality:
+- **Responsive Navigation**: Mobile-friendly navbar with hamburger menu
+- **Client-Side Routing**: Multi-page navigation without page reloads  
+- **Reusable Components**: Button component with multiple styles
+
+### Tech Stack:
+- **React** 18.3.1
+- **React Router DOM** 6.23.0 for routing
+- **Tailwind CSS** 3.4.3 for styling
+- **Font Awesome** for icons
+
+### Project Structure:
+- **src/index.js**: App entry point, renders App component into DOM
+- **src/App.js**: Main component setting up router with Navbar
+- **src/components/Navbar.js**: Responsive nav with mobile menu toggle
+- **src/components/Button.js**: Reusable button with style variants
+- **src/App.css**: Global styles and page layouts
+
+### How It Works:
+The app uses React Router to create a single-page application with client-side navigation. The Navbar component uses responsive design patterns, showing a hamburger menu on mobile (≤960px) and full navigation on desktop. The Button component provides consistent UI elements across the site with customizable styles.
+
+### Current State:
+This is a starter template - the routing structure exists but page components aren't implemented yet.
+```
 
 ## ✏️ MODIFICATION Tasks (10% of tasks) → USE TODOS FOR 8+ FILES
 

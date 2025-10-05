@@ -205,96 +205,60 @@ def print_prompt(message: str, *, title: str = "Confirm"):
 def print_help(project_info=None):
     """Display help information."""
     if project_info is None:
-        project_info = {"language": "unknown", "package_manager": None}
+        project_info = {"language": "unknown", "package_manager": None, "framework": None}
     
-                            
-    language_help = {
-        'python': {
-            'description': 'Python project with support for pip, poetry, and pipenv',
-            'tools': 'Python-specific tools: pytest, black, flake8, mypy',
-            'examples': ['run tests', 'format code', 'check types', 'install dependencies']
-        },
-        'javascript': {
-            'description': 'JavaScript/TypeScript project with npm/yarn support',
-            'tools': 'JS-specific tools: jest, eslint, prettier, webpack',
-            'examples': ['run tests', 'lint code', 'build project', 'install packages']
-        },
-        'go': {
-            'description': 'Go project with go modules support',
-            'tools': 'Go-specific tools: go test, go build, go fmt',
-            'examples': ['run tests', 'build binary', 'format code', 'get dependencies']
-        },
-        'rust': {
-            'description': 'Rust project with cargo support',
-            'tools': 'Rust-specific tools: cargo test, cargo build, cargo fmt',
-            'examples': ['run tests', 'build project', 'check code', 'update dependencies']
-        }
-    }
-    
-    lang_info = language_help.get(project_info['language'], {
-        'description': 'Generic project',
-        'tools': 'Universal tools available',
-        'examples': ['read files', 'search code', 'edit files', 'analyze project']
-    })
+    # Build language display with framework
+    lang_display = project_info.get('language', 'unknown')
+    if project_info.get('framework'):
+        lang_display = f"{lang_display} ({project_info['framework']})"
     
     help_text = f"""CodeGen CLI - Universal Coding Agent
 
-This universal CLI coding agent understands any codebase.
-It auto-detects your project type and adapts tools accordingly.
+A coding agent that understands any codebase and learns from results.
 
-Quick Start:
-  1. codegen --set-key   (saves your key to ~/.config/codegen/.env)
-  2. codegen             (run inside your project)
-  3. Try: help, list files, read README.md
+{Color.ACCENT}Current Project:{Color.RESET}
+  Language: {Color.BOLD}{lang_display}{Color.RESET}
+  Package Manager: {Color.BOLD}{project_info.get('package_manager') or 'None detected'}{Color.RESET}
 
-API Key:
-  • Auto-loads from ./.env, ~/.env, ~/.config/codegen/.env
-  • Or export GEMINI_API_KEY in your shell
-  • Get a key at: https://aistudio.google.com/api-keys
+{Color.ACCENT}Quick Start:{Color.RESET}
+  • Use natural language: "explain the codebase", "find all TODO comments"
+  • Ask questions: "how does authentication work?", "what does this function do?"
+  • Request changes: "add error handling to fetchData", "create a Header component"
 
-Current Project:
- * Language: {project_info['language']}
- * Package Manager: {project_info['package_manager'] or 'None detected'}
- * Description: {lang_info['description']}
+{Color.ACCENT}Common Commands:{Color.RESET}
+  • {Color.CODE}explain the codebase{Color.RESET}     Get detailed project analysis
+  • {Color.CODE}read path/to/file{Color.RESET}        View file contents
+  • {Color.CODE}grep "pattern"{Color.RESET}           Search across files
+  • {Color.CODE}list files{Color.RESET}               Show project structure
+  • {Color.CODE}find **/*.test.js{Color.RESET}        Find files by pattern
 
-Common Commands:
-  • help                      Show this help
-  • list files                List repository files
-  • read path/to/file         Print file contents
-  • grep "pattern"            Search across files
-  • write <file> <content>    Create/overwrite file (asks to confirm)
-  • edit <file>               Modify content safely
-  • delete <path>             Delete file or folder (asks to confirm)
+{Color.ACCENT}Available Tools:{Color.RESET}
+  File Ops:  read_file, write_file, edit_file, multi_edit, delete_file
+  Search:    list_files, find_files, grep
+  System:    run_command (bash)
+  Web:       fetch_url, search_web
+  Tasks:     manage_todos
 
-Core Functionality:
-  • Natural language interface: "summarize the repo", "find TODOs"
-  • Universal compatibility across languages
-  • Smart project detection
-  • Safety-first changes with confirmation
+{Color.ACCENT}Example Requests:{Color.RESET}
+  • "explain how the authentication system works"
+  • "find all functions that handle API requests"
+  • "create a new component called UserProfile"
+  • "add type hints to all functions in utils.py"
+  • "rename getUserData to fetchUserProfile in all files"
 
-Available Tools:
+{Color.ACCENT}Features:{Color.RESET}
+  ✓ Conversation memory - remembers context from previous requests
+  ✓ Smart detection - auto-detects languages, frameworks, package managers
+  ✓ Safety first - previews changes and asks for confirmation
+  ✓ Iterative reasoning - learns from results and adapts approach
 
- * File Operations: read, write, edit, delete, list files
- * Search & Analysis: grep, search, analyze codebase
- * Web Integration: web search, fetch URLs
- * System Operations: bash commands, project management
- * Language-Specific: {lang_info['tools']}
+{Color.ACCENT}Setup:{Color.RESET}
+  API Key:  codegen --set-key YOUR_KEY
+  Version:  codegen --version
+  Updates:  codegen --check-update
+  Exit:     Ctrl+C or type 'exit'
 
-Examples:
-  • {lang_info['examples'][0]}
-  • {lang_info['examples'][1]}
-  • {lang_info['examples'][2]}
-  • {lang_info['examples'][3] if len(lang_info['examples']) > 3 else 'analyze project'}
-
-Workflow:
-
-The agent follows a "discovery-first" approach:
-
-  1. Discover: Find files and understand project structure
-  2. Inspect: Examine code and identify patterns
-  3. Modify: Make changes safely with confirmation
-
-This ensures deliberate and predictable actions across any codebase."""
+Get your free Gemini API key: {Color.CODE}https://aistudio.google.com/api-keys{Color.RESET}"""
     
     print_boxed("CodeGen CLI - Universal Coding Agent", help_text)
 

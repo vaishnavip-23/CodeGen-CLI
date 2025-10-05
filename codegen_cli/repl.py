@@ -72,9 +72,14 @@ def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: boo
 
     title_line = f"{color.ACCENT}{color.BOLD}CodeGen CLI{color.RESET} {color.MUTED}— Universal Coding Agent{color.RESET}"
 
+    # Build language display with framework if available
+    lang_display = project_info['language']
+    if project_info.get('framework'):
+        lang_display = f"{project_info['language']} ({project_info['framework']})"
+    
     details = [
         f"{color.MUTED}Workspace:{color.RESET} {workspace_root}",
-        f"{color.MUTED}Language:{color.RESET} {project_info['language']}",
+        f"{color.MUTED}Language:{color.RESET} {lang_display}",
     ]
 
     if project_info.get('package_manager'):
@@ -183,7 +188,9 @@ def run_repl(deps: Dict[str, Any]) -> None:
                             summary = result.get("output", "")
                         break
                 
-                output.print_success(f"Task completed in {state.iterations} iterations")
+                # Simple completion message (efficiency metrics only in verbose/debug mode)
+                output.print_success(f"✓ Task completed in {state.iterations} iterations")
+                
                 if summary:
                     print(f"\n{output.Color.BOLD}Summary:{output.Color.RESET}\n{summary}\n")
             else:
