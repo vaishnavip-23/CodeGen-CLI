@@ -12,8 +12,17 @@ A powerful command-line coding agent with **iterative reasoning** capabilities, 
 - Google Gemini API key (get one at https://aistudio.google.com/api-keys)
 
 ## Key features
+- **Conversation Memory**: Like Claude Code! Maintains context across tasks - understands "that file", "the comment", "that function" from previous interactions
 - **Agentic Loop**: Iterative reasoning where agent sees results and adapts strategy for decision making
 - **Natural language REPL**: Ask questions in plain English
+- **Multi-turn Conversations**: Natural follow-up requests without repeating context
+  ```
+  You: "create test.py with a hello function"
+  Agent: ✓ Created test.py
+  
+  You: "add a docstring to that function"
+  Agent: ✓ [Knows you mean hello() in test.py]
+  ```
 - **Auto-detection**: Automatically detects project type (Python, JS, Go, Rust, Java, C#, PHP, Ruby) and package managers (pip, poetry, npm, yarn, cargo, etc.)
 - **12 Built-in Tools**:
   - File operations: read_file, write_file, edit_file, multi_edit, delete_file
