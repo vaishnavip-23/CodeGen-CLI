@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 # File Summary: Primary application bootstrap handling environment setup and REPL startup.
 
 
@@ -455,18 +455,7 @@ def append_history(user_text: str, agent_plan: Any, results: Any):
             json.dump(hist, f, indent=2)
     except Exception:
         pass
-
-
-
-
-
-
-
-
-
-                             
-           
-                             
+  
 def repl():
     """Start the interactive REPL."""
     from .repl import run_repl

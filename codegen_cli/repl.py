@@ -91,7 +91,7 @@ def _print_intro(workspace_root: str, project_info: Dict[str, Any], has_key: boo
 
     tips = [
         f"{color.ACCENT}Tips{color.RESET}:",
-        "  • Try: 'Update all print statements to use logging'",
+        "  • Keep CodeGen updated to get latest improvements",
         "  • Agent works iteratively: discovers, plans, executes",
         "  • Type 'help' for guidance",
     ]
