@@ -68,7 +68,7 @@ Ask for help: Type "help" for guidance
 | `help` | Show help information |
 | `exit` or `Ctrl+C` | Exit the REPL |
 | `codegen --version` | Show version |
-| `codegen --check-update` | Check for updates |
+| `codegen --check-update` or `codegen update` | Check for updates |
 | `codegen --set-key` | Save API key |
 
 ## License
