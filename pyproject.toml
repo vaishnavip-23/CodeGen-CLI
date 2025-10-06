@@ -1,6 +1,6 @@
 [project]
 name = "codegen-cli"
-version = "0.3.4"
+version = "0.3.5"
 description = "Command-line coding agent with iterative reasoning, inspired by Claude Code and Cursor CLI, powered by Google Gemini API."
 readme = "README.md"
 license = {text = "MIT"}
