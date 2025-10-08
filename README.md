@@ -1,4 +1,5 @@
 # CodeGen-CLI - Coding Agent
+
 [![PyPI](https://img.shields.io/pypi/v/codegen-cli)](https://pypi.org/project/codegen-cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 A powerful command-line coding agent with **iterative reasoning** capabilities, inspired by Claude Code and Cursor CLI, powered by Google Gemini API. Published on PyPI for easy installation and updates.
