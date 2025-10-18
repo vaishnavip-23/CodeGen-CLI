@@ -6,7 +6,7 @@ natural multi-turn conversations like Claude Code.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Set
+from typing import List, Any, Set
 from collections import deque
 
 
