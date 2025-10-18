@@ -1,5 +1,6 @@
 # CodeGen-CLI - Coding Agent
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A powerful command-line coding agent with **iterative reasoning** capabilities, inspired by Claude Code and Cursor CLI, powered by Google Gemini API. Published on PyPI for easy installation and updates.
 > Your expert developer assistant that understands any codebase, never gets tired, and continuously learns from results.
 
@@ -14,6 +15,7 @@ A powerful command-line coding agent with **iterative reasoning** capabilities, 
 - **Conversation Memory**: Maintains context across tasks - understands "that file", "the comment", "that function" from previous interactions
 - **Auto-detection**: Automatically detects project type (Python, JS, Go, Rust, Java, C#, PHP, Ruby) and package managers (pip, poetry, npm, yarn, cargo, etc.)
 - **Agentic Loop**: Iterative reasoning where agent sees results and adapts strategy for decision making
+- **Structured Responses**: Uses Pydantic for structured input and outputs
 - **Tools Used**: 
     - **File operations**: read_file, write_file, edit_file, multi_edit, delete_file
     - **Search & Discovery**: list_files (ls), find_files (glob), grep
@@ -67,7 +69,7 @@ Ask for help: Type "help" for guidance
 | `help` | Show help information |
 | `exit` or `Ctrl+C` | Exit the REPL |
 | `codegen --version` | Show version |
-| `codegen --check-update` | Check for updates |
+| `codegen --check-update` or `codegen update` | Check for updates |
 | `codegen --set-key` | Save API key |
 
 ## License
