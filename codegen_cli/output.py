@@ -6,7 +6,6 @@ Output formatting utilities for CodeGen2 CLI agent.
 Provides colored, structured output for user interactions, tool results, and error messages.
 """
 
-import json
 import os
 import re
 import shutil
@@ -162,9 +161,71 @@ def print_user_input(text: str):
     print(f"\n{Color.HEADER}> {text}{Color.RESET}")
 
 
-def print_agent_action(tool_name: str):
-    """Display agent tool usage - COMPACT."""
-    print(f"{Color.TOOL}→ {tool_name}{Color.RESET}", end="", flush=True)
+def print_agent_action(tool_name: str, tool_args: dict = None):
+    """Display agent tool usage with arguments - TRANSPARENT."""
+    if tool_args:
+        # Show key arguments for transparency
+        args_display = _format_tool_args(tool_name, tool_args)
+        if args_display:
+            print(f"{Color.TOOL}→ {tool_name}{Color.RESET}: {Color.CODE}{args_display}{Color.RESET}", end="", flush=True)
+        else:
+            print(f"{Color.TOOL}→ {tool_name}{Color.RESET}", end="", flush=True)
+    else:
+        print(f"{Color.TOOL}→ {tool_name}{Color.RESET}", end="", flush=True)
+
+
+def _format_tool_args(tool_name: str, args: dict) -> str:
+    """Format tool arguments for display (show key info only)."""
+    if tool_name == "run_command":
+        # ALWAYS show bash commands for transparency
+        cmd = args.get("command", "")
+        return cmd[:100] + "..." if len(cmd) > 100 else cmd
+    
+    elif tool_name in ("read_file", "write_file", "edit_file", "delete_file"):
+        # Show file path
+        file_path = args.get("file_path", "")
+        if file_path:
+            # Show just filename or last 2 path components
+            parts = file_path.split("/")
+            if len(parts) > 2:
+                return "/".join(parts[-2:])
+            return file_path
+    
+    elif tool_name == "find_files":
+        # Show pattern
+        pattern = args.get("pattern", "")
+        return f"pattern={pattern}" if pattern else ""
+    
+    elif tool_name == "grep":
+        # Show pattern and file type if specified
+        pattern = args.get("pattern", "")
+        file_type = args.get("type", "")
+        if file_type:
+            return f'"{pattern}" --type {file_type}'
+        return f'"{pattern}"'
+    
+    elif tool_name == "list_files":
+        # Show path
+        path = args.get("path", ".")
+        return path if path != "." else ""
+    
+    elif tool_name == "edit_file":
+        # Show what's being replaced (first 40 chars)
+        old = args.get("old_string", "")
+        new = args.get("new_string", "")
+        if old and new:
+            old_preview = old[:40] + "..." if len(old) > 40 else old
+            new_preview = new[:40] + "..." if len(new) > 40 else new
+            return f'"{old_preview}" → "{new_preview}"'
+    
+    return ""
+
+
+def print_agent_thinking(thought: str):
+    """Display agent's reasoning/summary - COMPACT."""
+    # Wrap long thoughts to 80 chars
+    wrapped = textwrap.fill(thought, width=80, initial_indent="  ", subsequent_indent="  ")
+    print(f"\n{Color.COMMENT}💭 {wrapped}{Color.RESET}")
 
 
 def print_boxed(title: str, content: str, *, style: str = "info"):
@@ -348,7 +409,7 @@ def _looks_like_code(text: str) -> bool:
 
 
 def print_tool_result(tool_name: str, result: Dict[str, Any]):
-    """Display tool execution result - COMPACT VERSION."""
+    """Display tool execution result with structured schema support - ENHANCED."""
     success = bool(result.get("success", False))
     status = "✓" if success else "✗"
     status_color = Color.SUCCESS if success else Color.ERROR
@@ -358,31 +419,129 @@ def print_tool_result(tool_name: str, result: Dict[str, Any]):
     
     output_data = result.get("output")
     
-    # Special handling for todos
-    if tool_name == "manage_todos" and isinstance(output_data, list):
-        print(f" → {len(output_data)} todos")
-        for todo in output_data:
-            if isinstance(todo, dict):
-                status_icon = "✓" if todo.get("status") == "completed" else "☐" if todo.get("status") == "pending" else "►"
-                content = todo.get("content", str(todo))
-                print(f"  {status_icon} {content}")
-        return
+    # Handle structured schema outputs
+    if isinstance(output_data, dict):
+        # ReadOutput schema
+        if "total_lines" in output_data and "lines_returned" in output_data:
+            print(f" → Read {output_data['lines_returned']}/{output_data['total_lines']} lines")
+            return
+        
+        # WriteOutput schema
+        if "bytes_written" in output_data and "file_path" in output_data:
+            print(f" → Wrote {output_data['bytes_written']} bytes to {output_data['file_path']}")
+            return
+        
+        # EditOutput schema
+        if "replacements" in output_data:
+            print(f" → {output_data['replacements']} replacement(s) in {output_data.get('file_path', 'file')}")
+            return
+        
+        # DeleteOutput schema
+        if "deleted_items" in output_data:
+            print(f" → Deleted {output_data['count']} item(s)")
+            for item in output_data['deleted_items'][:3]:
+                print(f"  • {item}")
+            return
+        
+        # BashOutput schema - ENHANCED with stderr/stdout
+        if "exitCode" in output_data:
+            exit_code = output_data['exitCode']
+            output_text = output_data.get('output', '')
+            
+            # Color code exit code
+            if exit_code == 0:
+                print(f" → Exit code: {Color.SUCCESS}{exit_code}{Color.RESET}")
+            else:
+                print(f" → Exit code: {Color.ERROR}{exit_code}{Color.RESET}")
+            
+            # Show output if present (first 300 chars)
+            if output_text:
+                # Check if it looks like an error
+                is_error = exit_code != 0 or any(word in output_text.lower() for word in ['error', 'traceback', 'exception', 'failed'])
+                
+                # Split by lines and show first few
+                lines = output_text.strip().split('\n')
+                
+                if is_error and len(output_text) > 100:
+                    # For errors, show STDERR prominently
+                    print(f"   {Color.ERROR}STDERR:{Color.RESET}")
+                    for line in lines[:5]:  # Show first 5 lines
+                        if line.strip():
+                            truncated = line[:120] + "..." if len(line) > 120 else line
+                            print(f"   {truncated}")
+                else:
+                    # For successful output, show compactly
+                    preview = output_text[:300]
+                    # Remove newlines and compress whitespace
+                    preview = ' '.join(preview.split())
+                    if len(output_text) > 300:
+                        preview += "..."
+                    print(f"   {preview}")
+            return
+        
+        # GlobOutput schema
+        if "matches" in output_data and "search_path" in output_data:
+            print(f" → Found {output_data['count']} matches")
+            for match in output_data['matches'][:5]:
+                print(f"  • {match}")
+            return
+        
+        # LsOutput schema
+        if "files" in output_data and isinstance(output_data['files'], list):
+            print(f" → {output_data['count']} files in {output_data.get('path', '')}")
+            for f in output_data['files'][:5]:
+                print(f"  • {f}")
+            return
+        
+        # GrepOutput schemas
+        if "total_matches" in output_data:
+            print(f" → {output_data['total_matches']} matches")
+            for match in output_data.get('matches', [])[:5]:
+                if isinstance(match, dict):
+                    print(f"  • {match.get('file')}:{match.get('line_number', '?')}")
+            return
+        
+        # WebSearchOutput schema
+        if "results" in output_data and "query" in output_data:
+            print(f" → {output_data['total_results']} results for '{output_data['query']}'")
+            for res in output_data['results'][:3]:
+                if isinstance(res, dict):
+                    print(f"  • {res.get('title', '')[:60]}")
+            return
+        
+        # TodoWriteOutput schema
+        if "stats" in output_data:
+            stats = output_data['stats']
+            print(f" → {stats['total']} todos ({stats['pending']} pending, {stats['completed']} done)")
+            return
+        
+        # MultiEditOutput schema
+        if "total_edits" in output_data:
+            print(f" → {output_data['successful_edits']}/{output_data['total_edits']} edits successful")
+            return
+        
+        # Generic dict output
+        print(f" → {len(output_data)} fields")
     
-    # Show compact result
-    if isinstance(output_data, list):
+    # Handle list outputs
+    elif isinstance(output_data, list):
         count = len(output_data)
         print(f" → {count} items")
         if count > 0 and count <= 5:
             for item in output_data[:5]:
                 item_str = str(item) if not isinstance(item, dict) else item.get("file", str(item))
                 print(f"  • {item_str[:80]}")
-    elif isinstance(output_data, dict):
-        print(f" → {len(output_data)} keys")
+    
+    # Handle string outputs
     elif isinstance(output_data, str):
         preview = output_data[:200].replace('\n', ' ')
-        print(f" → {preview}...")
+        print(f" → {preview}..." if len(output_data) > 200 else f" → {preview}")
+    
+    # Handle other types
     elif output_data is not None:
         print(f" → {str(output_data)[:100]}")
+    
+    # Fallback to message
     else:
         msg = result.get("message", "")
         if msg:
