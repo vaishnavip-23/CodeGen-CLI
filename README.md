@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A powerful command-line coding agent with **iterative reasoning** capabilities, inspired by Claude Code and Cursor CLI, powered by Google Gemini API. Published on PyPI for easy installation and updates.
+
 > Your expert developer assistant that understands any codebase, never gets tired, and continuously learns from results.
 
 **BYOK (Bring Your Own Key)**: This tool requires you to provide your own Google Gemini API key. CodeGen-CLI does not include or provide API keys. You are responsible for obtaining a key and managing your API usage and costs. Codegen works the best with a pro account!
