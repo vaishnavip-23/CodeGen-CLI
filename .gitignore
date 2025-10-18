@@ -196,7 +196,9 @@ uv.lock
 .python-version
 PyPI guide.txt
 # Summary file (not for version control)
-complete_summary.txt
+
 
 .ruff_cache
+COMPLETE_EXPLANATION.MD
+HOW_DROID_WORKS.md
 
