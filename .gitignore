@@ -198,3 +198,5 @@ PyPI guide.txt
 # Summary file (not for version control)
 complete_summary.txt
 
+.ruff_cache
+
