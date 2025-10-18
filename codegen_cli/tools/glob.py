@@ -9,12 +9,14 @@ It includes safety checks to prevent access outside the workspace.
 
 import os
 import glob
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 try:
     from google.genai import types
 except ImportError:
     types = None
+
+from ..models.schema import GlobInput, GlobOutput
 
 WORKSPACE = os.getcwd()
 
@@ -84,8 +86,16 @@ def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
         Dictionary with success status and list of matching files
     """
     try:
-                                  
-        full_pattern = os.path.join(WORKSPACE, pattern)
+        input_data = GlobInput(
+            pattern=pattern,
+            path=kwargs.get("path")
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
+    
+    try:
+        search_path = input_data.path if input_data.path else WORKSPACE
+        full_pattern = os.path.join(search_path, input_data.pattern)
         
                              
         matches = glob.glob(full_pattern, recursive=True)
@@ -101,19 +111,12 @@ def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
                                             
         safe_matches.sort()
         
-        return {
-            "tool": "glob",
-            "success": True,
-            "output": safe_matches,
-            "meta": {
-                "pattern": pattern,
-                "matches_found": len(safe_matches)
-            }
-        }
+        output = GlobOutput(
+            matches=safe_matches,
+            count=len(safe_matches),
+            search_path=search_path
+        )
+        return output.model_dump()
         
     except Exception as e:
-        return {
-            "tool": "glob",
-            "success": False,
-            "output": f"Error matching pattern: {e}"
-        }
+        raise IOError(f"Error matching pattern: {e}")

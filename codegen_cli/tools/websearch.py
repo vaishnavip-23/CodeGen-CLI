@@ -16,6 +16,8 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import WebSearchInput, WebSearchResult, WebSearchOutput
+
 # Function declaration for Gemini function calling
 FUNCTION_DECLARATION = {
     "name": "search_web",
@@ -135,48 +137,39 @@ def call(query: str, *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Dictionary with success status and search results
     """
-                                     
-    max_results = kwargs.get("max_results", 5)
-                     
-    if not query or not query.strip():
-        return {
-            "tool": "websearch",
-            "success": False,
-            "output": "Search query cannot be empty."
-        }
+    try:
+        input_data = WebSearchInput(
+            query=query,
+            allowed_domains=kwargs.get("allowed_domains"),
+            blocked_domains=kwargs.get("blocked_domains")
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
     
-    if max_results < 1 or max_results > 20:
-        return {
-            "tool": "websearch",
-            "success": False,
-            "output": "Max results must be between 1 and 20."
-        }
+    if not input_data.query.strip():
+        raise ValueError("Search query cannot be empty")
+    
+    max_results = kwargs.get("max_results", 5)
     
     try:
-                        
-        results = search_web(query.strip(), max_results)
+        results = search_web(input_data.query.strip(), max_results)
         
-        if not results:
-            return {
-                "tool": "websearch",
-                "success": True,
-                "output": f"No results found for '{query}'"
-            }
+        search_results = [
+            WebSearchResult(
+                title=r["title"],
+                url=r["url"],
+                snippet=r.get("snippet", ""),
+                metadata=None
+            )
+            for r in results
+        ]
         
-        return {
-            "tool": "websearch",
-            "success": True,
-            "output": results,
-            "meta": {
-                "query": query,
-                "results_count": len(results),
-                "max_results": max_results
-            }
-        }
+        output = WebSearchOutput(
+            results=search_results,
+            total_results=len(search_results),
+            query=input_data.query
+        )
+        return output.model_dump()
         
     except Exception as e:
-        return {
-            "tool": "websearch",
-            "success": False,
-            "output": f"Web search error: {e}"
-        }
+        raise IOError(f"Web search error: {e}")

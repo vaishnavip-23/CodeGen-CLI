@@ -17,6 +17,8 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import TodoItem, TodoStats, TodoWriteOutput
+
 # Function declaration for Gemini function calling
 FUNCTION_DECLARATION = {
     "name": "manage_todos",
@@ -217,7 +219,7 @@ def remove_first_todo() -> Dict[str, Any]:
             "output": "No todos to remove."
         }
     
-    removed_todo = todos.pop(0)
+    todos.pop(0)
     write_todos(todos)
     
     return {
@@ -240,7 +242,7 @@ def clear_todos() -> Dict[str, Any]:
         import shutil
         if os.path.exists(DB_DIR):
             shutil.rmtree(DB_DIR)
-    except Exception as e:
+    except Exception:
                                                                                
         pass
     
@@ -306,30 +308,47 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Result dictionary
     """
-                                                                                                 
-                                                                                             
+    # Handle direct list of todos
     if isinstance(action, list):
-        todos_arg = action
-        merge = False
-        if isinstance(kwargs, dict):
-            merge = bool(kwargs.get("merge", False))
+        # Validate items can be converted to TodoItem objects
+        try:
+            for t in action:
+                TodoItem(
+                    content=t.get("content", ""),
+                    status=t.get("status", "pending"),
+                    priority=t.get("priority"),
+                    id=t.get("id")
+                )
+        except Exception as e:
+            raise ValueError(f"Invalid input: {e}")
+        
+        merge = kwargs.get("merge", False)
         if merge:
             existing = read_todos()
-            updated = _merge_by_id(existing, todos_arg)
+            updated = _merge_by_id(existing, action)
             return _write_full_list(updated)
-        return _write_full_list(todos_arg)
+        return _write_full_list(action)
 
-                                                                                                    
+    # Handle list passed as first argument
     if args and isinstance(args[0], list):
-        todos_arg = args[0]
-        merge = False
-        if isinstance(kwargs, dict):
-            merge = bool(kwargs.get("merge", False))
+        # Validate items can be converted to TodoItem objects
+        try:
+            for t in args[0]:
+                TodoItem(
+                    content=t.get("content", ""),
+                    status=t.get("status", "pending"),
+                    priority=t.get("priority"),
+                    id=t.get("id")
+                )
+        except Exception as e:
+            raise ValueError(f"Invalid input: {e}")
+        
+        merge = kwargs.get("merge", False)
         if merge:
             existing = read_todos()
-            updated = _merge_by_id(existing, todos_arg)
+            updated = _merge_by_id(existing, args[0])
             return _write_full_list(updated)
-        return _write_full_list(todos_arg)
+        return _write_full_list(args[0])
 
                                                                            
     if args and isinstance(args[0], dict):
@@ -346,18 +365,24 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
     action = action or "list"
     
     if action == "add":
-        # Get text from either args or kwargs
         text = " ".join(args) if args else kwargs.get("text", "")
         if not text:
-            return {
-                "tool": "todowrite",
-                "success": False,
-                "output": "Please provide todo text. Example: manage_todos(action='add', text='List all files')"
-            }
+            raise ValueError("Please provide todo text")
         return add_todo(text)
     
     elif action == "list":
-        return list_todos()
+        todos = read_todos()
+        stats = TodoStats(
+            total=len(todos),
+            pending=len([t for t in todos if t.get("status") == "pending"]),
+            in_progress=len([t for t in todos if t.get("status") == "in_progress"]),
+            completed=len([t for t in todos if t.get("status") == "completed"])
+        )
+        output = TodoWriteOutput(
+            message=f"Found {len(todos)} todos",
+            stats=stats
+        )
+        return output.model_dump()
     
     elif action == "pop":
         return remove_first_todo()
@@ -366,8 +391,4 @@ def call(action: str = "list", *args, **kwargs) -> Dict[str, Any]:
         return clear_todos()
     
     else:
-        return {
-            "tool": "todowrite",
-            "success": False,
-            "output": f"Unknown action: {action}. Available actions: add, list, pop, clear"
-        }
+        raise ValueError(f"Unknown action: {action}. Available actions: add, list, pop, clear")

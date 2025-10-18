@@ -11,7 +11,18 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import ReadInput, ReadOutput
+
 WORKSPACE = os.getcwd()
+
+def is_safe_path(file_path: str) -> bool:
+    """Check if file path is within workspace for security."""
+    try:
+        abs_path = os.path.abspath(file_path)
+        workspace_path = os.path.abspath(WORKSPACE)
+        return os.path.commonpath([workspace_path, abs_path]) == workspace_path
+    except (ValueError, OSError):
+        return False
 
 # Function declaration for Gemini function calling
 FUNCTION_DECLARATION = {
@@ -20,9 +31,9 @@ FUNCTION_DECLARATION = {
     "parameters": {
         "type": "object",
         "properties": {
-            "path": {
+            "file_path": {
                 "type": "string",
-                "description": "Relative path to the file from workspace root"
+                "description": "The absolute path to the file to read"
             },
             "offset": {
                 "type": "integer",
@@ -33,7 +44,7 @@ FUNCTION_DECLARATION = {
                 "description": "Maximum number of lines to read (optional)"
             }
         },
-        "required": ["path"]
+        "required": ["file_path"]
     }
 }
 
@@ -48,65 +59,56 @@ def get_function_declaration():
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "path": types.Schema(type=types.Type.STRING, description="Relative path to the file from workspace root"),
+                "file_path": types.Schema(type=types.Type.STRING, description="The absolute path to the file to read"),
                 "offset": types.Schema(type=types.Type.INTEGER, description="Line number to start reading from (0-based, optional)"),
                 "limit": types.Schema(type=types.Type.INTEGER, description="Maximum number of lines to read (optional)")
             },
-            required=["path"]
+            required=["file_path"]
         )
     )
 
-def is_safe_path(file_path: str) -> bool:
-    """Check if file path is within workspace."""
-    try:
-        abs_path = os.path.abspath(os.path.join(WORKSPACE, file_path))
-        workspace_path = os.path.abspath(WORKSPACE)
-        return os.path.commonpath([workspace_path, abs_path]) == workspace_path
-    except (ValueError, OSError):
-        return False
-
-def call(path: str, *args, **kwargs) -> dict:
+def call(file_path: str, *args, **kwargs) -> dict:
     """Read file contents with optional line limits."""
-    offset = kwargs.get("offset")
-    limit = kwargs.get("limit")
+    try:
+        input_data = ReadInput(
+            file_path=file_path,
+            offset=kwargs.get("offset"),
+            limit=kwargs.get("limit")
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
     
-    if not is_safe_path(path):
-        return {
-            "success": False, 
-            "output": "Access denied: Path outside workspace not allowed."
-        }
+    if not os.path.isabs(input_data.file_path):
+        workspace = os.getcwd()
+        raise ValueError(f"file_path must be an absolute path. Got: '{input_data.file_path}'. Use: '{os.path.join(workspace, input_data.file_path)}'")
     
-    full_path = os.path.join(WORKSPACE, path)
-    if not os.path.exists(full_path):
-        return {
-            "success": False, 
-            "output": f"File not found: {path}"
-        }
+    if not is_safe_path(input_data.file_path):
+        raise ValueError(f"Access denied: {input_data.file_path} is outside workspace")
+    
+    if not os.path.exists(input_data.file_path):
+        raise FileNotFoundError(f"File not found: {input_data.file_path}")
     
     try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as file:
-            lines = file.readlines()
+        with open(input_data.file_path, "r", encoding="utf-8", errors="replace") as file:
+            all_lines = file.readlines()
         
-                           
-        if offset is not None or limit is not None:
-            try:
-                start_line = int(offset) if offset is not None else 0
-                end_line = start_line + int(limit) if limit is not None else len(lines)
-            except (ValueError, TypeError):
-                return {
-                    "success": False,
-                    "output": f"Invalid offset or limit values. Expected integers, got offset={offset}, limit={limit}"
-                }
-            lines = lines[start_line:end_line]
+        total_lines = len(all_lines)
+        start_line = input_data.offset if input_data.offset is not None else 0
+        end_line = start_line + input_data.limit if input_data.limit is not None else total_lines
         
-        content = "".join(lines)
-        return {
-            "success": True, 
-            "output": content
-        }
+        selected_lines = all_lines[start_line:end_line]
+        
+        content_with_line_numbers = ""
+        for i, line in enumerate(selected_lines, start=start_line + 1):
+            content_with_line_numbers += f"{i}: {line}"
+        
+        output = ReadOutput(
+            content=content_with_line_numbers,
+            total_lines=total_lines,
+            lines_returned=len(selected_lines)
+        )
+        
+        return output.model_dump()
         
     except Exception as e:
-        return {
-            "success": False, 
-            "output": f"Error reading file: {e}"
-        }
+        raise IOError(f"Error reading file: {e}")

@@ -14,6 +14,8 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import GrepInput, GrepMatch, GrepOutputContent, GrepOutputFiles
+
 WORKSPACE = os.getcwd()
 
 # Function declaration for Gemini function calling
@@ -79,16 +81,16 @@ def search_in_file(file_path: str, pattern: str, multiline: bool = False) -> Lis
                 for match in re.finditer(pattern, content, flags):
                     matches.append({
                         "file": file_path,
-                        "line": content[:match.start()].count('\n') + 1,
-                        "text": match.group(0).strip()
+                        "line_number": content[:match.start()].count('\n') + 1,
+                        "line": match.group(0).strip()
                     })
             else:
                 for line_num, line in enumerate(file, 1):
                     if re.search(pattern, line):
                         matches.append({
                             "file": file_path,
-                            "line": line_num,
-                            "text": line.strip()
+                            "line_number": line_num,
+                            "line": line.strip()
                         })
     except Exception:
         pass
@@ -96,66 +98,67 @@ def search_in_file(file_path: str, pattern: str, multiline: bool = False) -> Lis
 
 def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
     """Search for pattern in files matching path pattern."""
-    path_pattern = args[0] if len(args) > 0 else kwargs.get("path_pattern", "**/*.py")
-    head_limit = kwargs.get("head_limit", 50)
-    output_mode = kwargs.get("output_mode", "content")
-    multiline = kwargs.get("multiline", False)
+    try:
+        input_data = GrepInput(
+            pattern=pattern,
+            path=kwargs.get("path"),
+            glob=kwargs.get("glob"),
+            type=kwargs.get("type"),
+            output_mode=kwargs.get("output_mode", "content"),
+            case_insensitive=kwargs.get("case_insensitive"),
+            line_numbers=kwargs.get("line_numbers"),
+            context_before=kwargs.get("context_before"),
+            context_after=kwargs.get("context_after"),
+            context=kwargs.get("context"),
+            head_limit=kwargs.get("head_limit", 50),
+            multiline=kwargs.get("multiline")
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
     
-    if not pattern:
-        return {
-            "tool": "grep",
-            "success": False,
-            "output": "Pattern is required"
-        }
+    path_pattern = args[0] if len(args) > 0 else kwargs.get("path_pattern", "**/*.py")
+    multiline = input_data.multiline if input_data.multiline else False
     
     try:
-                                     
         search_path = os.path.join(WORKSPACE, path_pattern)
         files = glob(search_path, recursive=True)
         
-                                   
         safe_files = [f for f in files if is_safe_path(f)]
         
         if not safe_files:
-            return {
-                "tool": "grep",
-                "success": True,
-                "output": "No files found matching pattern"
-            }
+            raise FileNotFoundError("No files found matching pattern")
         
-                         
         all_matches = []
         for file_path in safe_files:
-            matches = search_in_file(file_path, pattern, multiline)
+            matches = search_in_file(file_path, input_data.pattern, multiline)
             all_matches.extend(matches)
         
-                          
-        if head_limit and len(all_matches) > head_limit:
-            all_matches = all_matches[:head_limit]
+        if input_data.head_limit and len(all_matches) > input_data.head_limit:
+            all_matches = all_matches[:input_data.head_limit]
         
-        if output_mode == "files_with_matches":
+        if input_data.output_mode == "files_with_matches":
             unique_files = list(set(match["file"] for match in all_matches))
-            return {
-                "tool": "grep",
-                "success": True,
-                "output": unique_files
-            }
-        elif output_mode == "count":
-            return {
-                "tool": "grep",
-                "success": True,
-                "output": len(all_matches)
-            }
-        else:                
-            return {
-                "tool": "grep",
-                "success": True,
-                "output": all_matches
-            }
+            output = GrepOutputFiles(
+                files=unique_files,
+                count=len(unique_files)
+            )
+            return output.model_dump()
+        else:
+            grep_matches = [
+                GrepMatch(
+                    file=m["file"],
+                    line_number=m.get("line_number"),
+                    line=m.get("line", m.get("match", "")),
+                    before_context=None,
+                    after_context=None
+                )
+                for m in all_matches
+            ]
+            output = GrepOutputContent(
+                matches=grep_matches,
+                total_matches=len(grep_matches)
+            )
+            return output.model_dump()
         
     except Exception as e:
-        return {
-            "tool": "grep",
-            "success": False,
-            "output": f"Error searching files: {e}"
-        }
+        raise IOError(f"Error searching files: {e}")

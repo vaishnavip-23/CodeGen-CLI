@@ -14,18 +14,20 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import DeleteInput, DeleteOutput
+
 WORKSPACE = Path(os.getcwd())
 
 # Function declaration for Gemini function calling
 FUNCTION_DECLARATION = {
     "name": "delete_file",
-    "description": "Delete a file or directory. Use with caution - this is destructive.",
+    "description": "Delete a file or directory (including all contents). Directories are deleted recursively with all files inside. Use with caution - this is destructive and cannot be undone.",
     "parameters": {
         "type": "object",
         "properties": {
             "path": {
                 "type": "string",
-                "description": "Path to file or directory to delete"
+                "description": "Path to file or directory to delete. If directory, all contents will be deleted recursively."
             }
         },
         "required": ["path"]
@@ -43,7 +45,7 @@ def get_function_declaration():
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "path": types.Schema(type=types.Type.STRING, description="Path to file or directory to delete")
+                "path": types.Schema(type=types.Type.STRING, description="Path to file or directory to delete. If directory, all contents will be deleted recursively.")
             },
             required=["path"]
         )
@@ -89,38 +91,16 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Dictionary with success status and result
     """
-                                                                
-    suggested = kwargs.pop("suggested_path", None)
-
-                   
-    if (not path or not isinstance(path, str)) and not suggested:
-        return {
-            "tool": "delete",
-            "success": False,
-            "output": "Path is required. If you meant a file by name, try specifying it.",
-            "args": [path],
-            "kwargs": kwargs
-        }
-
-                                                                                     
-    if (not path or not isinstance(path, str)) and suggested:
-        try:
-            ans = input(f"Did you mean to delete '{suggested}'? (y/n) ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            ans = "n"
-        if ans not in ("y", "yes"):
-            return {"tool": "delete", "success": False, "output": "Deletion cancelled.", "args": [suggested], "kwargs": {}}
-        path = suggested
+    if not path:
+        raise ValueError("Path is required")
     
-                           
-    if not is_safe_path(path):
-        return {
-            "tool": "delete",
-            "success": False,
-            "output": f"Path '{path}' is outside workspace. Deletion not allowed.",
-            "args": [path],
-            "kwargs": kwargs
-        }
+    try:
+        input_data = DeleteInput(path=path)
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
+    
+    if not is_safe_path(input_data.path):
+        raise ValueError(f"Path '{input_data.path}' is outside workspace. Deletion not allowed.")
     
     matches = _paths_for_pattern(path)
     if not matches:
@@ -170,18 +150,11 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
             skipped.append(f"Unexpected error for {rel}: {exc}")
 
     if deleted:
-        return {
-            "tool": "delete",
-            "success": True,
-            "output": "\n".join(deleted),
-            "confirmations": confirmations,
-            "skipped": skipped,
-        }
+        output = DeleteOutput(
+            message="\n".join(deleted),
+            deleted_items=deleted,
+            count=len(deleted)
+        )
+        return output.model_dump()
 
-    return {
-        "tool": "delete",
-        "success": False,
-        "output": "Deletion cancelled." if skipped else "No deletions performed.",
-        "confirmations": confirmations,
-        "skipped": skipped,
-    }
+    raise IOError("Deletion cancelled." if skipped else "No deletions performed.")

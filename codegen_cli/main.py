@@ -11,11 +11,11 @@ Uses Google Gemini API for plan generation and executes actions through modular 
 
 import os
 import json
-import traceback
 from datetime import datetime
-from typing import Tuple, Any, Dict, List
+from typing import Any, Dict, List
 from pathlib import Path
-import sys
+
+from . import output
 
                             
 def _try_parse_env_file(path: Path) -> Dict[str, str]:
@@ -366,9 +366,6 @@ def detect_project_type(workspace_path: str) -> dict:
 
                         
 PROJECT_INFO = detect_project_type(WORKSPACE_ROOT)
-
-                      
-from . import output
 
                              
                 

@@ -13,6 +13,8 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import LsInput, LsOutput
+
 DEFAULT_IGNORE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", ".env", 
     ".cache", ".pytest_cache", "dist", "build"
@@ -121,30 +123,29 @@ def walk_directory(root: Path, max_depth: int = None, ignore_set: set = None, sh
 
 def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
     """List files and directories in the specified path."""
-    options = kwargs
+    try:
+        input_data = LsInput(
+            path=path,
+            depth=kwargs.get("depth"),
+            show_hidden=kwargs.get("show_hidden", False)
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
     
     try:
-        root_path = Path(path).resolve()
+        root_path = Path(input_data.path).resolve()
         
         if not root_path.exists():
-            return {
-                "tool": "ls",
-                "success": False,
-                "output": f"Path not found: {path}"
-            }
+            raise FileNotFoundError(f"Path not found: {input_data.path}")
         
         if not root_path.is_dir():
-            return {
-                "tool": "ls",
-                "success": False,
-                "output": f"Not a directory: {path}"
-            }
+            raise ValueError(f"Not a directory: {input_data.path}")
         
-        max_depth = options.get("depth")
-        show_hidden = options.get("show_hidden", False)
+        max_depth = input_data.depth
+        show_hidden = input_data.show_hidden
         
         ignore_set = DEFAULT_IGNORE_DIRS.copy()
-        custom_ignore = options.get("ignore", [])
+        custom_ignore = kwargs.get("ignore", [])
         if isinstance(custom_ignore, list):
             ignore_set.update(custom_ignore)
         
@@ -153,15 +154,12 @@ def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
         
         files = walk_directory(root_path, max_depth, ignore_set, show_hidden)
         
-        return {
-            "tool": "ls",
-            "success": True,
-            "output": files
-        }
+        output = LsOutput(
+            files=files,
+            count=len(files),
+            path=str(root_path)
+        )
+        return output.model_dump()
         
     except Exception as e:
-        return {
-            "tool": "ls",
-            "success": False,
-            "output": f"Error listing directory: {e}"
-        }
+        raise IOError(f"Error listing directory: {e}")

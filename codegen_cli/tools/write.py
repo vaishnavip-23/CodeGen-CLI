@@ -11,7 +11,18 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import WriteInput, WriteOutput
+
 WORKSPACE = os.getcwd()
+
+def is_safe_path(file_path: str) -> bool:
+    """Check if file path is within workspace for security."""
+    try:
+        abs_path = os.path.abspath(file_path)
+        workspace_path = os.path.abspath(WORKSPACE)
+        return os.path.commonpath([workspace_path, abs_path]) == workspace_path
+    except (ValueError, OSError):
+        return False
 
 # Function declaration for Gemini function calling
 FUNCTION_DECLARATION = {
@@ -20,16 +31,16 @@ FUNCTION_DECLARATION = {
     "parameters": {
         "type": "object",
         "properties": {
-            "path": {
+            "file_path": {
                 "type": "string",
-                "description": "Path where file should be created"
+                "description": "The absolute path to the file to write"
             },
             "content": {
                 "type": "string",
-                "description": "Content to write to the file"
+                "description": "The content to write to the file"
             }
         },
-        "required": ["path", "content"]
+        "required": ["file_path", "content"]
     }
 }
 
@@ -44,52 +55,47 @@ def get_function_declaration():
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "path": types.Schema(type=types.Type.STRING, description="Path where file should be created"),
-                "content": types.Schema(type=types.Type.STRING, description="Content to write to the file")
+                "file_path": types.Schema(type=types.Type.STRING, description="The absolute path to the file to write"),
+                "content": types.Schema(type=types.Type.STRING, description="The content to write to the file")
             },
-            required=["path", "content"]
+            required=["file_path", "content"]
         )
     )
 
-def is_safe_path(file_path: str) -> bool:
-    """Check if file path is within workspace."""
-    try:
-        abs_path = os.path.abspath(os.path.join(WORKSPACE, file_path))
-        workspace_path = os.path.abspath(WORKSPACE)
-        return os.path.commonpath([workspace_path, abs_path]) == workspace_path
-    except (ValueError, OSError):
-        return False
-
-def call(path: str, *args, **kwargs) -> dict:
+def call(file_path: str, *args, **kwargs) -> dict:
     """Write content to file, creating directories if needed."""
-    # Get content from kwargs first, then args
-    content = kwargs.get("content", "")
-    if not content and args:
-        content = " ".join(str(arg) for arg in args)
+    try:
+        input_data = WriteInput(
+            file_path=file_path,
+            content=kwargs.get("content", "")
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
     
-    if not is_safe_path(path):
-        return {
-            "success": False, 
-            "output": "Access denied: Path outside workspace not allowed."
-        }
+    if not os.path.isabs(input_data.file_path):
+        workspace = os.getcwd()
+        raise ValueError(f"file_path must be an absolute path. Got: '{input_data.file_path}'. Use: '{os.path.join(workspace, input_data.file_path)}'")
+    
+    if not is_safe_path(input_data.file_path):
+        raise ValueError(f"Access denied: {input_data.file_path} is outside workspace")
     
     try:
-        full_path = os.path.join(WORKSPACE, path)
-        directory = os.path.dirname(full_path)
+        directory = os.path.dirname(input_data.file_path)
         if directory and not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
         
-        with open(full_path, "w", encoding="utf-8") as file:
-            file.write(str(content))
+        with open(input_data.file_path, "w", encoding="utf-8") as file:
+            file.write(input_data.content)
         
-        rel_path = os.path.relpath(full_path, WORKSPACE)
-        return {
-            "success": True, 
-            "output": f"Wrote to {rel_path}"
-        }
+        bytes_written = len(input_data.content.encode('utf-8'))
+        
+        output = WriteOutput(
+            message=f"Successfully wrote to {input_data.file_path}",
+            bytes_written=bytes_written,
+            file_path=input_data.file_path
+        )
+        
+        return output.model_dump()
         
     except Exception as e:
-        return {
-            "success": False, 
-            "output": f"Error writing file: {e}"
-        }
+        raise IOError(f"Error writing file: {e}")

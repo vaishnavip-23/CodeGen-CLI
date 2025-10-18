@@ -13,6 +13,8 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import BashInput, BashOutput
+
 DISALLOWED_COMMANDS = {
     "sudo", "ssh", "scp", "rm -rf", "reboot", "shutdown", "poweroff",
     "su", "passwd", "chmod 777", "chown", "dd", "mkfs", "fdisk"
@@ -68,8 +70,18 @@ def is_command_allowed(command: List[str]) -> tuple[bool, str]:
 
 def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
     """Execute bash command safely."""
-    timeout_ms = kwargs.get("timeout_ms", 120000)
-    description = kwargs.get("description")
+    try:
+        input_data = BashInput(
+            command=command if isinstance(command, str) else " ".join(command),
+            timeout=kwargs.get("timeout"),
+            description=kwargs.get("description"),
+            run_in_background=kwargs.get("run_in_background", False)
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
+    
+    timeout_ms = input_data.timeout if input_data.timeout else 120000
+    command = input_data.command
     
     # Check if command contains shell features (pipes, redirections, etc.)
     shell_features = ['|', '>', '<', '&', ';', '&&', '||', '2>&1']
@@ -134,22 +146,15 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
         if result.stderr:
             output_text += f"\nSTDERR:\n{result.stderr}"
         
-        return {
-            "tool": "bash",
-            "success": result.returncode == 0,
-            "output": output_text,
-            "return_code": result.returncode
-        }
+        output = BashOutput(
+            output=output_text,
+            exitCode=result.returncode,
+            killed=False,
+            shellId=None
+        )
+        return output.model_dump()
         
     except subprocess.TimeoutExpired:
-        return {
-            "tool": "bash",
-            "success": False,
-            "output": f"Command timed out after {timeout_ms}ms"
-        }
+        raise TimeoutError(f"Command timed out after {timeout_ms}ms")
     except Exception as e:
-        return {
-            "tool": "bash",
-            "success": False,
-            "output": f"Error executing command: {e}"
-        }
+        raise IOError(f"Error executing command: {e}")

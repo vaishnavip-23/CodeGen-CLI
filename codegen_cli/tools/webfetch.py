@@ -16,6 +16,8 @@ try:
 except ImportError:
     types = None
 
+from ..models.schema import WebFetchInput, WebFetchOutput
+
 # Function declaration for Gemini function calling  
 FUNCTION_DECLARATION = {
     "name": "fetch_url",
@@ -125,46 +127,30 @@ def call(url: str, *args, **kwargs) -> Dict[str, Any]:
     Returns:
         Dictionary with success status and content
     """
-                                    
+    try:
+        input_data = WebFetchInput(
+            url=url.strip() if url else "",
+            prompt=kwargs.get("prompt", "")
+        )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
+    
+    fetch_url = input_data.url
+    if not (fetch_url.startswith("http://") or fetch_url.startswith("https://")):
+        fetch_url = "https://" + fetch_url
+    
     max_chars = kwargs.get("max_chars", 20000)
-                     
-    if not url or not url.strip():
-        return {
-            "tool": "webfetch",
-            "success": False,
-            "output": "URL cannot be empty."
-        }
-    
-    if max_chars < 100 or max_chars > 100000:
-        return {
-            "tool": "webfetch",
-            "success": False,
-            "output": "Max characters must be between 100 and 100000."
-        }
-    
-                         
-    url = url.strip()
-    if not (url.startswith("http://") or url.startswith("https://")):
-        url = "https://" + url
     
     try:
-                       
-        content = fetch_web_content(url, max_chars)
+        content = fetch_web_content(fetch_url, max_chars)
         
-        return {
-            "tool": "webfetch",
-            "success": True,
-            "output": content,
-            "meta": {
-                "url": url,
-                "content_length": len(content["text"]),
-                "max_chars": max_chars
-            }
-        }
+        output = WebFetchOutput(
+            response=content["text"],
+            url=fetch_url,
+            final_url=None,
+            status_code=None
+        )
+        return output.model_dump()
         
     except Exception as e:
-        return {
-            "tool": "webfetch",
-            "success": False,
-            "output": f"Web fetch error: {e}"
-        }
+        raise IOError(f"Web fetch error: {e}")

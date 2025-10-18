@@ -1,8 +1,6 @@
 # File Summary: Implementation of the MultiEdit tool for atomic batch edits.
 
 import os
-import py_compile
-import traceback
 
 from .edit import call as edit_call
 
@@ -10,6 +8,8 @@ try:
     from google.genai import types
 except ImportError:
     types = None
+
+from ..models.schema import MultiEditChange, MultiEditResult, MultiEditOutput
 
 WORKSPACE = os.getcwd()
 
@@ -74,27 +74,6 @@ def get_function_declaration():
     )
 
 
-def _check_python_files(paths):
-    errors = []
-    for rel_path in sorted(set(p for p in paths if p.endswith(".py"))):
-        abs_path = os.path.abspath(os.path.join(WORKSPACE, rel_path))
-        try:
-            py_compile.compile(abs_path, doraise=True)
-        except py_compile.PyCompileError as exc:                                        
-            errors.append({
-                "path": rel_path,
-                "error": str(exc),
-                "details": exc.msg if hasattr(exc, "msg") else None,
-            })
-        except Exception as exc:                                
-            errors.append({
-                "path": rel_path,
-                "error": f"Unexpected compile error: {exc}",
-                "traceback": traceback.format_exc(),
-            })
-    return errors
-
-
 def _normalize_entries(first_arg, maybe_entries, kwargs):
     if isinstance(first_arg, list):
         return None, first_arg
@@ -119,27 +98,28 @@ def _normalize_entries(first_arg, maybe_entries, kwargs):
 
 def call(*args, **kwargs):
     if not args:
-        return {"success": False, "output": "multiedit expects edits."}
+        raise ValueError("multiedit expects edits")
+    
     base_path, entries = _normalize_entries(args[0], args[1] if len(args) > 1 else None, kwargs)
     if entries is None:
-        return {"success": False, "output": "Unable to determine edits for MultiEdit."}
+        raise ValueError("Unable to determine edits for MultiEdit")
     if isinstance(entries, dict):
         entries = [entries]
     if not isinstance(entries, (list, tuple)):
-        return {"success": False, "output": "multiedit expects a list of edit dicts."}
+        raise ValueError("multiedit expects a list of edit dicts")
+    
+    # Validate entries can be converted to MultiEditChange objects
+    try:
+        for e in entries:
+            MultiEditChange(
+                path=e.get("path"),
+                old_string=e.get("old_string", e.get("a")),
+                new_string=e.get("new_string", e.get("b")),
+                replace_all=e.get("replace_all", False)
+            )
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
 
-    # Check syntax BEFORE making any edits to detect pre-existing errors
-    touched_paths = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        path = entry.get("path") or base_path
-        if path and path not in touched_paths:
-            touched_paths.append(path)
-    
-    pre_edit_errors = _check_python_files(touched_paths)
-    has_pre_existing_errors = len(pre_edit_errors) > 0
-    
     summary = []
     touched_paths = []
     for i, entry in enumerate(entries, start=1):
@@ -158,28 +138,30 @@ def call(*args, **kwargs):
             new_value = edit_data.get("b")
         replace_all = bool(edit_data.get("replace_all", False))
 
-        res = edit_call(
-            path,
-            old_value,
-            new_value,
-            replace_all=replace_all,
-            skip_python_check=True,
-        )
-        summary.append({"step": i, "path": path, "result": res})
-        if not res.get("success"):
-            return {"success": False, "output": summary}
+        try:
+            res = edit_call(
+                path,
+                old_value,
+                new_value,
+                replace_all=replace_all,
+                skip_python_check=True,
+            )
+            result_obj = MultiEditResult(
+                step=i,
+                path=path,
+                success=res.get("success", False),
+                message=res.get("output", "")
+            )
+            summary.append(result_obj)
+            if not res.get("success"):
+                raise IOError(f"Edit step {i} failed: {res.get('output')}")
+        except Exception as e:
+            raise IOError(f"Edit step {i} failed: {e}")
         touched_paths.append(path)
-
-    # Skip post-edit syntax check if there were pre-existing errors
-    if not has_pre_existing_errors:
-        syntax_errors = _check_python_files(touched_paths)
-        if syntax_errors:
-            return {"success": False, "output": summary, "errors": syntax_errors}
     
-    # Build result message
-    result = {"success": True, "output": summary}
-    if has_pre_existing_errors:
-        result["warning"] = "Files had pre-existing syntax errors. Consider rewriting with valid Python code using write_file tool."
-        result["had_pre_existing_errors"] = True
-
-    return result
+    output = MultiEditOutput(
+        results=summary,
+        total_edits=len(summary),
+        successful_edits=len([s for s in summary if s.success])
+    )
+    return output.model_dump()
