@@ -95,7 +95,7 @@ class AgenticLoop:
         
         # Get function declarations from all tools
         if types:
-            self.function_declarations = get_all_function_declarations()
+            self.function_declarations = get_all_function_declarations(client=self.client)
         else:
             self.function_declarations = []
     

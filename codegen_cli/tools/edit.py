@@ -1,6 +1,7 @@
 # File Summary: Implementation of the Edit tool for modifying existing files.
 
 """Edit tool - modifies existing files safely within the workspace.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 
 Now includes optional Python syntax checking after edits.
 """
@@ -15,54 +16,6 @@ except ImportError:
 
 from ..models.schema import EditInput, EditOutput
 
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "edit_file",
-    "description": "Edit an existing file by finding and replacing text. Read the file first to know exact text to replace.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "The absolute path to the file to modify"
-            },
-            "old_string": {
-                "type": "string",
-                "description": "The text to replace"
-            },
-            "new_string": {
-                "type": "string",
-                "description": "The text to replace it with"
-            },
-            "replace_all": {
-                "type": "boolean",
-                "description": "Replace all occurrences (default: false)"
-            }
-        },
-        "required": ["file_path", "old_string", "new_string"]
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "file_path": types.Schema(type=types.Type.STRING, description="The absolute path to the file to modify"),
-                "old_string": types.Schema(type=types.Type.STRING, description="The text to replace"),
-                "new_string": types.Schema(type=types.Type.STRING, description="The text to replace it with"),
-                "replace_all": types.Schema(type=types.Type.BOOLEAN, description="Replace all occurrences (default: false)")
-            },
-            required=["file_path", "old_string", "new_string"]
-        )
-    )
-
 WORKSPACE = os.getcwd()
 
 def is_safe_path(file_path: str) -> bool:
@@ -74,14 +27,29 @@ def is_safe_path(file_path: str) -> bool:
     except (ValueError, OSError):
         return False
 
-def call(file_path: str, *args, **kwargs) -> dict:
-    """Edit file by replacing text."""
+
+def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> dict:
+    """Edit an existing file by finding and replacing text.
+    
+    Modifies an existing file by replacing occurrences of old_string with new_string.
+    Read the file first to know the exact text to replace.
+    
+    Args:
+        file_path: The absolute path to the file to modify
+        old_string: The text to replace
+        new_string: The text to replace it with
+        replace_all: Replace all occurrences (default False, replaces first only)
+        
+    Returns:
+        A dictionary containing confirmation message, number of replacements, and file path.
+    """
+    # Validate using Pydantic model
     try:
         input_data = EditInput(
             file_path=file_path,
-            old_string=kwargs.get("old_string"),
-            new_string=kwargs.get("new_string"),
-            replace_all=kwargs.get("replace_all", False)
+            old_string=old_string,
+            new_string=new_string,
+            replace_all=replace_all
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
@@ -96,20 +64,16 @@ def call(file_path: str, *args, **kwargs) -> dict:
     if not os.path.exists(input_data.file_path):
         raise FileNotFoundError(f"File not found: {input_data.file_path}")
     
-    smart = kwargs.get("smart", True)
-    
-    old_string = input_data.old_string
-    new_string = input_data.new_string
-    replace_all = input_data.replace_all
+    smart = True  # Default smart matching behavior
     
     try:
         with open(input_data.file_path, "r", encoding="utf-8", errors="replace") as file:
             original_content = file.read()
         
-                                                                                         
-        if isinstance(old_string, str) and old_string == "":
+        # Special case: empty old_string means replace entire file
+        if isinstance(input_data.old_string, str) and input_data.old_string == "":
             with open(input_data.file_path, "w", encoding="utf-8") as file:
-                file.write(new_string)
+                file.write(input_data.new_string)
             
             output = EditOutput(
                 message=f"Successfully edited {input_data.file_path}",
@@ -118,14 +82,14 @@ def call(file_path: str, *args, **kwargs) -> dict:
             )
             return output.model_dump()
 
-        if old_string not in original_content:
-            if smart and isinstance(old_string, str):
-                                                                                                      
-                words = [w for w in re.split(r"\s+", old_string.strip()) if w]
+        if input_data.old_string not in original_content:
+            if smart and isinstance(input_data.old_string, str):
+                # Smart matching: try flexible whitespace matching
+                words = [w for w in re.split(r"\s+", input_data.old_string.strip()) if w]
                 if words:
                     pattern = r"\b" + r"\W+".join(re.escape(w) for w in words) + r"\b"
-                    count = 0 if replace_all else 1
-                    new_content, n = re.subn(pattern, new_string, original_content, count=count, flags=re.IGNORECASE)
+                    count = 0 if input_data.replace_all else 1
+                    new_content, n = re.subn(pattern, input_data.new_string, original_content, count=count, flags=re.IGNORECASE)
                     if n > 0:
                         with open(input_data.file_path, "w", encoding="utf-8") as file:
                             file.write(new_content)
@@ -136,17 +100,17 @@ def call(file_path: str, *args, **kwargs) -> dict:
                             file_path=input_data.file_path
                         )
                         return output.model_dump()
-            raise ValueError(f"Text '{old_string}' not found in file")
+            raise ValueError(f"Text '{input_data.old_string}' not found in file")
         
-        if replace_all:
-            new_content = original_content.replace(old_string, new_string)
+        if input_data.replace_all:
+            new_content = original_content.replace(input_data.old_string, input_data.new_string)
         else:
-            new_content = original_content.replace(old_string, new_string, 1)
+            new_content = original_content.replace(input_data.old_string, input_data.new_string, 1)
         
         with open(input_data.file_path, "w", encoding="utf-8") as file:
             file.write(new_content)
         
-        replacements = new_content.count(new_string) if replace_all else 1
+        replacements = new_content.count(input_data.new_string) if input_data.replace_all else 1
         output = EditOutput(
             message=f"Successfully edited {input_data.file_path}",
             replacements=replacements,
@@ -156,3 +120,32 @@ def call(file_path: str, *args, **kwargs) -> dict:
         
     except Exception as e:
         raise IOError(f"Error editing file: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=edit_file
+    )
+
+
+# Keep backward compatibility
+def call(file_path: str, *args, **kwargs) -> dict:
+    """Call function for backward compatibility with manual execution."""
+    return edit_file(
+        file_path=file_path,
+        old_string=kwargs.get("old_string", ""),
+        new_string=kwargs.get("new_string", ""),
+        replace_all=kwargs.get("replace_all", False)
+    )

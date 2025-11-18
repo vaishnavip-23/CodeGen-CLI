@@ -2,6 +2,7 @@
 
 """
 Write tool - creates or overwrites files safely within workspace.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 """
 
 import os
@@ -24,50 +25,24 @@ def is_safe_path(file_path: str) -> bool:
     except (ValueError, OSError):
         return False
 
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "write_file",
-    "description": "Create a new file or overwrite an existing file with content. Use for creating new files only.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "The absolute path to the file to write"
-            },
-            "content": {
-                "type": "string",
-                "description": "The content to write to the file"
-            }
-        },
-        "required": ["file_path", "content"]
-    }
-}
 
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
+def write_file(file_path: str, content: str) -> dict:
+    """Create a new file or overwrite an existing file with content.
     
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "file_path": types.Schema(type=types.Type.STRING, description="The absolute path to the file to write"),
-                "content": types.Schema(type=types.Type.STRING, description="The content to write to the file")
-            },
-            required=["file_path", "content"]
-        )
-    )
-
-def call(file_path: str, *args, **kwargs) -> dict:
-    """Write content to file, creating directories if needed."""
+    Use for creating new files only. Creates parent directories if needed.
+    
+    Args:
+        file_path: The absolute path to the file to write
+        content: The content to write to the file
+        
+    Returns:
+        A dictionary containing success message, bytes written, and file path.
+    """
+    # Validate using Pydantic model
     try:
         input_data = WriteInput(
             file_path=file_path,
-            content=kwargs.get("content", "")
+            content=content
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
@@ -99,3 +74,30 @@ def call(file_path: str, *args, **kwargs) -> dict:
         
     except Exception as e:
         raise IOError(f"Error writing file: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=write_file
+    )
+
+
+# Keep backward compatibility
+def call(file_path: str, *args, **kwargs) -> dict:
+    """Call function for backward compatibility with manual execution."""
+    return write_file(
+        file_path=file_path,
+        content=kwargs.get("content", "")
+    )

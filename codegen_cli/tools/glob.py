@@ -2,6 +2,7 @@
 
 """
 File Pattern Matching Tool for CodeGen-CLI
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 
 This tool finds files matching glob patterns within the workspace.
 It includes safety checks to prevent access outside the workspace.
@@ -9,7 +10,7 @@ It includes safety checks to prevent access outside the workspace.
 
 import os
 import glob
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 try:
     from google.genai import types
@@ -19,39 +20,6 @@ except ImportError:
 from ..models.schema import GlobInput, GlobOutput
 
 WORKSPACE = os.getcwd()
-
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "find_files",
-    "description": "Find files using glob patterns. Use for finding specific file types or names.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "pattern": {
-                "type": "string",
-                "description": "Glob pattern (e.g., '**/*.py' for all Python files, default: '**/*')"
-            }
-        },
-        "required": []
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "pattern": types.Schema(type=types.Type.STRING, description="Glob pattern (e.g., '**/*.py' for all Python files)")
-            },
-            required=[]
-        )
-    )
 
 def is_safe_path(file_path: str) -> bool:
     """
@@ -73,22 +41,25 @@ def is_safe_path(file_path: str) -> bool:
     except (ValueError, OSError):
         return False
 
-def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
-    """
-    Find files matching the given glob pattern.
+
+def find_files(pattern: str = "**/*", path: Optional[str] = None) -> Dict[str, Any]:
+    """Find files matching a glob pattern.
+    
+    Searches for files matching the specified glob pattern in the given directory or workspace.
+    Use for finding specific file types or names.
     
     Args:
-        pattern: Glob pattern to match files (default: "**/*" for all files)
-        *args: Additional positional arguments (ignored)
-        **kwargs: Keyword arguments (ignored for now)
+        pattern: Glob pattern to match files (e.g., '**/*.py' for all Python files, '**/*' for all files)
+        path: The directory to search in (optional, defaults to current working directory)
         
     Returns:
-        Dictionary with success status and list of matching files
+        A dictionary containing matching file paths, count, and search path.
     """
+    # Validate using Pydantic model
     try:
         input_data = GlobInput(
             pattern=pattern,
-            path=kwargs.get("path")
+            path=path
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
@@ -120,3 +91,30 @@ def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         raise IOError(f"Error matching pattern: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=find_files
+    )
+
+
+# Keep backward compatibility
+def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    return find_files(
+        pattern=pattern,
+        path=kwargs.get("path")
+    )

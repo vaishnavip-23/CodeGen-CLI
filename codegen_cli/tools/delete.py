@@ -1,6 +1,8 @@
 # File Summary: Implementation of the Delete tool for removing files and directories.
 
-"""Delete tool with glob discovery and confirmation safeguards."""
+"""Delete tool with glob discovery and confirmation safeguards.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
+"""
 
 from __future__ import annotations
 
@@ -17,39 +19,6 @@ except ImportError:
 from ..models.schema import DeleteInput, DeleteOutput
 
 WORKSPACE = Path(os.getcwd())
-
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "delete_file",
-    "description": "Delete a file or directory (including all contents). Directories are deleted recursively with all files inside. Use with caution - this is destructive and cannot be undone.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Path to file or directory to delete. If directory, all contents will be deleted recursively."
-            }
-        },
-        "required": ["path"]
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "path": types.Schema(type=types.Type.STRING, description="Path to file or directory to delete. If directory, all contents will be deleted recursively.")
-            },
-            required=["path"]
-        )
-    )
 
 
 def _paths_for_pattern(pattern: str) -> List[Path]:
@@ -79,17 +48,18 @@ def is_safe_path(path: str) -> bool:
     except Exception:
         return False
 
-def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
-    """
-    Delete a file or directory.
+
+def delete_file(path: str) -> Dict[str, Any]:
+    """Delete a file or directory.
+    
+    Removes a file or recursively removes a directory and all its contents.
+    Use with caution - this is destructive and cannot be undone.
     
     Args:
-        path: Path to delete
-        *args: Additional arguments (ignored)
-        **kwargs: Additional keyword arguments (ignored)
+        path: Path to file or directory to delete. If directory, all contents will be deleted recursively.
         
     Returns:
-        Dictionary with success status and result
+        A dictionary containing success message, list of deleted items, and count.
     """
     if not path:
         raise ValueError("Path is required")
@@ -108,15 +78,14 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
             "tool": "delete",
             "success": False,
             "output": f"No matches found for '{path}'.",
-            "args": [path],
-            "kwargs": kwargs,
+            "args": [path]
         }
 
     confirmations = []
     deleted = []
     skipped = []
-    # Check for confirmation bypass from kwargs or environment
-    auto_confirm = kwargs.get("confirm", False) or os.environ.get("CODEGEN_AUTO_CONFIRM") == "1"
+    # Check for confirmation bypass from environment (always auto-confirm in agent mode)
+    auto_confirm = os.environ.get("CODEGEN_AUTO_CONFIRM") == "1"
 
     for match in matches:
         rel = match.relative_to(WORKSPACE)
@@ -158,3 +127,29 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
         return output.model_dump()
 
     raise IOError("Deletion cancelled." if skipped else "No deletions performed.")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=delete_file
+    )
+
+
+# Keep backward compatibility
+def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    if not path:
+        raise ValueError("Path is required")
+    return delete_file(path=path)

@@ -2,6 +2,7 @@
 
 """
 Web Search Tool for CodeGen-CLI
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 
 This tool searches the web using DuckDuckGo and returns search results.
 It includes error handling and result formatting.
@@ -9,7 +10,7 @@ It includes error handling and result formatting.
 
 import requests
 from bs4 import BeautifulSoup
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 try:
     from google.genai import types
@@ -18,47 +19,9 @@ except ImportError:
 
 from ..models.schema import WebSearchInput, WebSearchResult, WebSearchOutput
 
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "search_web",
-    "description": "Search the web using DuckDuckGo for information, documentation, or examples.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query"
-            },
-            "max_results": {
-                "type": "integer",
-                "description": "Maximum number of results (1-20, default: 5)"
-            }
-        },
-        "required": ["query"]
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "query": types.Schema(type=types.Type.STRING, description="Search query"),
-                "max_results": types.Schema(type=types.Type.INTEGER, description="Max results (1-20)")
-            },
-            required=["query"]
-        )
-    )
-
 DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/"
 
-def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+def search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     """
     Search the web using DuckDuckGo.
     
@@ -124,24 +87,25 @@ def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     except Exception as e:
         raise Exception(f"Parsing error: {e}")
 
-def call(query: str, *args, **kwargs) -> Dict[str, Any]:
-    """
-    Search the web for the given query.
+def search_web(query: str, allowed_domains: Optional[List[str]] = None, blocked_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Search the web for information.
+    
+    Performs a web search using DuckDuckGo and returns relevant results.
     
     Args:
-        query: Search query string
-        *args: Additional positional arguments (ignored)
-        **kwargs: Keyword arguments including:
-            max_results: Maximum number of results to return (default: 5)
+        query: The search query to use
+        allowed_domains: Only include results from these domains (optional)
+        blocked_domains: Never include results from these domains (optional)
         
     Returns:
-        Dictionary with success status and search results
+        A dictionary containing search results, total count, and query used.
     """
+    # Validate using Pydantic model
     try:
         input_data = WebSearchInput(
             query=query,
-            allowed_domains=kwargs.get("allowed_domains"),
-            blocked_domains=kwargs.get("blocked_domains")
+            allowed_domains=allowed_domains,
+            blocked_domains=blocked_domains
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
@@ -149,10 +113,10 @@ def call(query: str, *args, **kwargs) -> Dict[str, Any]:
     if not input_data.query.strip():
         raise ValueError("Search query cannot be empty")
     
-    max_results = kwargs.get("max_results", 5)
+    max_results = 5
     
     try:
-        results = search_web(input_data.query.strip(), max_results)
+        results = search_duckduckgo(input_data.query.strip(), max_results)
         
         search_results = [
             WebSearchResult(
@@ -173,3 +137,31 @@ def call(query: str, *args, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         raise IOError(f"Web search error: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=search_web
+    )
+
+
+# Keep backward compatibility
+def call(query: str, *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    return search_web(
+        query=query,
+        allowed_domains=kwargs.get("allowed_domains"),
+        blocked_domains=kwargs.get("blocked_domains")
+    )

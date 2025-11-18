@@ -64,8 +64,15 @@ def get_tool_module(tool_name: str):
         raise RuntimeError(f"Tool '{tool_name}' not found")
 
 
-def get_all_function_declarations():
-    """Get function declarations for all tools."""
+def get_all_function_declarations(client=None):
+    """Get function declarations for all tools.
+    
+    Args:
+        client: Gemini client instance (required for from_callable() in tools)
+        
+    Returns:
+        List of FunctionDeclaration objects for all tools
+    """
     if types is None:
         return []
     
@@ -74,11 +81,15 @@ def get_all_function_declarations():
         try:
             module = importlib.import_module(f"codegen_cli.tools.{module_name}")
             if hasattr(module, 'get_function_declaration'):
-                decl = module.get_function_declaration()
+                # Pass client to get_function_declaration for from_callable() support
+                decl = module.get_function_declaration(client)
                 if decl:
                     declarations.append(decl)
-        except Exception:
-            # Skip tools that fail to load
+        except Exception as e:
+            # Skip tools that fail to load (log error for debugging)
+            import traceback
+            print(f"Warning: Failed to load tool '{tool_name}': {e}")
+            traceback.print_exc()
             continue
     
     # Add special task_complete function

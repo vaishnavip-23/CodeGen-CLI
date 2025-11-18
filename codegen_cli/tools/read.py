@@ -2,9 +2,11 @@
 
 """
 Read tool - reads file contents safely within workspace.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 """
 
 import os
+from typing import Optional
 
 try:
     from google.genai import types
@@ -24,56 +26,27 @@ def is_safe_path(file_path: str) -> bool:
     except (ValueError, OSError):
         return False
 
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "read_file",
-    "description": "Read the contents of a file in the workspace. Use this to examine code, configuration, or any text file.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "The absolute path to the file to read"
-            },
-            "offset": {
-                "type": "integer",
-                "description": "Line number to start reading from (0-based, optional)"
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Maximum number of lines to read (optional)"
-            }
-        },
-        "required": ["file_path"]
-    }
-}
 
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
+def read_file(file_path: str, offset: Optional[int] = None, limit: Optional[int] = None) -> ReadOutput:
+    """Read the contents of a file in the workspace.
     
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "file_path": types.Schema(type=types.Type.STRING, description="The absolute path to the file to read"),
-                "offset": types.Schema(type=types.Type.INTEGER, description="Line number to start reading from (0-based, optional)"),
-                "limit": types.Schema(type=types.Type.INTEGER, description="Maximum number of lines to read (optional)")
-            },
-            required=["file_path"]
-        )
-    )
-
-def call(file_path: str, *args, **kwargs) -> dict:
-    """Read file contents with optional line limits."""
+    Use this to examine code, configuration, or any text file. Returns file contents
+    with line numbers for easy reference.
+    
+    Args:
+        file_path: The absolute path to the file to read
+        offset: Line number to start reading from (0-based, optional)
+        limit: Maximum number of lines to read (optional)
+        
+    Returns:
+        A Pydantic model containing file content with line numbers, total lines, and lines returned.
+    """
+    # Validate using Pydantic model
     try:
         input_data = ReadInput(
             file_path=file_path,
-            offset=kwargs.get("offset"),
-            limit=kwargs.get("limit")
+            offset=offset,
+            limit=limit
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
@@ -108,7 +81,37 @@ def call(file_path: str, *args, **kwargs) -> dict:
             lines_returned=len(selected_lines)
         )
         
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Error reading file: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    # Use from_callable to automatically generate schema from the function
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=read_file
+    )
+
+
+# Keep backward compatibility - the call function for manual execution
+def call(file_path: str, *args, **kwargs) -> dict:
+    """Call function for backward compatibility with manual execution."""
+    result = read_file(
+        file_path=file_path,
+        offset=kwargs.get("offset"),
+        limit=kwargs.get("limit")
+    )
+    return result.model_dump()

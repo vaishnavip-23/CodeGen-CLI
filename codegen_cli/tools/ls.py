@@ -2,11 +2,12 @@
 
 """
 List files tool - lists files and directories with filtering options.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 """
 
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 try:
     from google.genai import types
@@ -19,49 +20,6 @@ DEFAULT_IGNORE_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", ".env", 
     ".cache", ".pytest_cache", "dist", "build"
 }
-
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "list_files",
-    "description": "List files and directories in the workspace. Use to discover project structure.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Directory path to list (default: '.')"
-            },
-            "depth": {
-                "type": "integer",
-                "description": "Maximum depth to traverse (default: unlimited)"
-            },
-            "show_hidden": {
-                "type": "boolean",
-                "description": "Show hidden files (default: false)"
-            }
-        },
-        "required": []
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "path": types.Schema(type=types.Type.STRING, description="Directory path to list (default: '.')"),
-                "depth": types.Schema(type=types.Type.INTEGER, description="Maximum depth to traverse"),
-                "show_hidden": types.Schema(type=types.Type.BOOLEAN, description="Show hidden files")
-            },
-            required=[]
-        )
-    )
 
 def read_gitignore_patterns(root: Path) -> List[str]:
     """Read .gitignore file and extract simple directory patterns."""
@@ -121,13 +79,27 @@ def walk_directory(root: Path, max_depth: int = None, ignore_set: set = None, sh
     
     return sorted(files)
 
-def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
-    """List files and directories in the specified path."""
+
+def list_files(path: str = ".", depth: Optional[int] = None, show_hidden: bool = False) -> Dict[str, Any]:
+    """List files and directories in the workspace.
+    
+    Lists all files and directories with options for depth control and showing hidden files.
+    Use to discover project structure and find files.
+    
+    Args:
+        path: Directory path to list (default: '.')
+        depth: Maximum depth to traverse (optional, unlimited by default)
+        show_hidden: Show hidden files (default False)
+        
+    Returns:
+        A dictionary containing list of files, count, and path.
+    """
+    # Validate using Pydantic model
     try:
         input_data = LsInput(
             path=path,
-            depth=kwargs.get("depth"),
-            show_hidden=kwargs.get("show_hidden", False)
+            depth=depth,
+            show_hidden=show_hidden
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
@@ -142,17 +114,14 @@ def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
             raise ValueError(f"Not a directory: {input_data.path}")
         
         max_depth = input_data.depth
-        show_hidden = input_data.show_hidden
+        show_hidden_files = input_data.show_hidden
         
         ignore_set = DEFAULT_IGNORE_DIRS.copy()
-        custom_ignore = kwargs.get("ignore", [])
-        if isinstance(custom_ignore, list):
-            ignore_set.update(custom_ignore)
         
         gitignore_patterns = read_gitignore_patterns(root_path)
         ignore_set.update(gitignore_patterns)
         
-        files = walk_directory(root_path, max_depth, ignore_set, show_hidden)
+        files = walk_directory(root_path, max_depth, ignore_set, show_hidden_files)
         
         output = LsOutput(
             files=files,
@@ -163,3 +132,31 @@ def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         raise IOError(f"Error listing directory: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=list_files
+    )
+
+
+# Keep backward compatibility
+def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    return list_files(
+        path=path,
+        depth=kwargs.get("depth"),
+        show_hidden=kwargs.get("show_hidden", False)
+    )

@@ -2,11 +2,12 @@
 
 """
 Bash tool - executes shell commands safely with security restrictions.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 """
 
 import shlex
 import subprocess
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 
 try:
     from google.genai import types
@@ -20,43 +21,6 @@ DISALLOWED_COMMANDS = {
     "su", "passwd", "chmod 777", "chown", "dd", "mkfs", "fdisk"
 }
 
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "run_command",
-    "description": "Execute a shell command safely. Use only when no specialized tool exists. Dangerous commands are blocked.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "Shell command to execute"
-            },
-            "description": {
-                "type": "string",
-                "description": "Description of what this command does"
-            }
-        },
-        "required": ["command"]
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "command": types.Schema(type=types.Type.STRING, description="Shell command to execute"),
-                "description": types.Schema(type=types.Type.STRING, description="Description of what this command does")
-            },
-            required=["command"]
-        )
-    )
 
 def is_command_allowed(command: List[str]) -> tuple[bool, str]:
     """Check if command is allowed to execute."""
@@ -68,32 +32,47 @@ def is_command_allowed(command: List[str]) -> tuple[bool, str]:
     
     return True, ""
 
-def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
-    """Execute bash command safely."""
+
+def run_command(command: str, timeout: Optional[int] = None, description: str = "", run_in_background: bool = False) -> Dict[str, Any]:
+    """Execute a shell command safely.
+    
+    Runs a shell command and returns the output. Use for running tests, building,
+    or any command-line operations. Dangerous commands are blocked for security.
+    
+    Args:
+        command: The command to execute
+        timeout: Optional timeout in milliseconds (default 120000, max 600000)
+        description: Clear, concise description of what this command does
+        run_in_background: Set to true to run in background (not implemented yet)
+        
+    Returns:
+        A dictionary containing output, exit code, and optional shell ID for background processes.
+    """
+    # Validate using Pydantic model
     try:
         input_data = BashInput(
-            command=command if isinstance(command, str) else " ".join(command),
-            timeout=kwargs.get("timeout"),
-            description=kwargs.get("description"),
-            run_in_background=kwargs.get("run_in_background", False)
+            command=command,
+            timeout=timeout,
+            description=description,
+            run_in_background=run_in_background
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
     
     timeout_ms = input_data.timeout if input_data.timeout else 120000
-    command = input_data.command
+    cmd = input_data.command
     
     # Check if command contains shell features (pipes, redirections, etc.)
     shell_features = ['|', '>', '<', '&', ';', '&&', '||', '2>&1']
     use_shell = False
     
-    if isinstance(command, str):
+    if isinstance(cmd, str):
         # Check if we need shell mode
-        use_shell = any(feature in command for feature in shell_features)
+        use_shell = any(feature in cmd for feature in shell_features)
         
         if not use_shell:
             try:
-                command_parts = shlex.split(command)
+                command_parts = shlex.split(cmd)
             except ValueError as e:
                 return {
                     "tool": "bash",
@@ -102,9 +81,9 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
                 }
         else:
             # For shell commands, keep as string
-            command_parts = command
+            command_parts = cmd
     else:
-        command_parts = command
+        command_parts = cmd
     
     if not command_parts:
         return {
@@ -158,3 +137,33 @@ def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
         raise TimeoutError(f"Command timed out after {timeout_ms}ms")
     except Exception as e:
         raise IOError(f"Error executing command: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=run_command
+    )
+
+
+# Keep backward compatibility
+def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    cmd_str = command if isinstance(command, str) else " ".join(command)
+    return run_command(
+        command=cmd_str,
+        timeout=kwargs.get("timeout"),
+        description=kwargs.get("description", ""),
+        run_in_background=kwargs.get("run_in_background", False)
+    )

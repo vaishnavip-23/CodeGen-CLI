@@ -2,12 +2,13 @@
 
 """
 Grep tool - searches for text patterns in files using glob patterns.
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 """
 
 import os
 import re
 from glob import glob
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 try:
     from google.genai import types
@@ -17,49 +18,6 @@ except ImportError:
 from ..models.schema import GrepInput, GrepMatch, GrepOutputContent, GrepOutputFiles
 
 WORKSPACE = os.getcwd()
-
-# Function declaration for Gemini function calling
-FUNCTION_DECLARATION = {
-    "name": "grep",
-    "description": "Search for text patterns across files using regular expressions. Great for finding specific code patterns.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "pattern": {
-                "type": "string",
-                "description": "Search pattern (regex supported)"
-            },
-            "path_pattern": {
-                "type": "string",
-                "description": "File pattern to search in (e.g., '**/*.py' for all Python files, default: '**/*.py')"
-            },
-            "output_mode": {
-                "type": "string",
-                "description": "Output format: 'content' (default), 'files_with_matches', or 'count'"
-            }
-        },
-        "required": ["pattern"]
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "pattern": types.Schema(type=types.Type.STRING, description="Search pattern (regex supported)"),
-                "path_pattern": types.Schema(type=types.Type.STRING, description="File pattern to search in (e.g., '**/*.py' for all Python files)"),
-                "output_mode": types.Schema(type=types.Type.STRING, description="Output format: 'content', 'files_with_matches', or 'count'")
-            },
-            required=["pattern"]
-        )
-    )
 
 def is_safe_path(file_path: str) -> bool:
     """Check if file path is within workspace."""
@@ -96,28 +54,62 @@ def search_in_file(file_path: str, pattern: str, multiline: bool = False) -> Lis
         pass
     return matches
 
-def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
-    """Search for pattern in files matching path pattern."""
+def grep(
+    pattern: str,
+    path: Optional[str] = None,
+    glob: Optional[str] = None,
+    type: Optional[str] = None,
+    output_mode: str = "content",
+    case_insensitive: Optional[bool] = None,
+    line_numbers: Optional[bool] = None,
+    context_before: Optional[int] = None,
+    context_after: Optional[int] = None,
+    context: Optional[int] = None,
+    head_limit: int = 50,
+    multiline: Optional[bool] = None
+) -> Dict[str, Any]:
+    """Search for text patterns across files using regular expressions.
+    
+    High-performance file content search using ripgrep-style parameters.
+    Supports regex patterns, file type filtering, glob patterns, and context lines.
+    
+    Args:
+        pattern: Search pattern (regex supported)
+        path: Absolute path to a file or directory to search in (optional)
+        glob: Glob pattern to filter files, e.g., "*.js" for JavaScript files (optional)
+        type: Ripgrep file type filter for common file types, e.g., "js" for JavaScript (optional)
+        output_mode: Output format - "content" returns matching lines, "files_with_matches" returns only file paths
+        case_insensitive: Perform case-insensitive matching (optional)
+        line_numbers: Show line numbers in output (optional)
+        context_before: Number of lines to show before each match (optional)
+        context_after: Number of lines to show after each match (optional)
+        context: Number of lines to show before and after each match (optional)
+        head_limit: Limit output to first N lines/entries (default: 50)
+        multiline: Enable multiline mode where patterns can span lines (optional)
+        
+    Returns:
+        Dictionary containing matches or file paths and total count.
+    """
     try:
         input_data = GrepInput(
             pattern=pattern,
-            path=kwargs.get("path"),
-            glob=kwargs.get("glob"),
-            type=kwargs.get("type"),
-            output_mode=kwargs.get("output_mode", "content"),
-            case_insensitive=kwargs.get("case_insensitive"),
-            line_numbers=kwargs.get("line_numbers"),
-            context_before=kwargs.get("context_before"),
-            context_after=kwargs.get("context_after"),
-            context=kwargs.get("context"),
-            head_limit=kwargs.get("head_limit", 50),
-            multiline=kwargs.get("multiline")
+            path=path,
+            glob=glob,
+            type=type,
+            output_mode=output_mode,
+            case_insensitive=case_insensitive,
+            line_numbers=line_numbers,
+            context_before=context_before,
+            context_after=context_after,
+            context=context,
+            head_limit=head_limit,
+            multiline=multiline
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
     
-    path_pattern = args[0] if len(args) > 0 else kwargs.get("path_pattern", "**/*.py")
-    multiline = input_data.multiline if input_data.multiline else False
+    path_pattern = "**/*.py"  # Default pattern
+    multiline_mode = input_data.multiline if input_data.multiline else False
     
     try:
         search_path = os.path.join(WORKSPACE, path_pattern)
@@ -130,7 +122,7 @@ def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
         
         all_matches = []
         for file_path in safe_files:
-            matches = search_in_file(file_path, input_data.pattern, multiline)
+            matches = search_in_file(file_path, input_data.pattern, multiline_mode)
             all_matches.extend(matches)
         
         if input_data.head_limit and len(all_matches) > input_data.head_limit:
@@ -162,3 +154,40 @@ def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         raise IOError(f"Error searching files: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=grep
+    )
+
+
+# Keep backward compatibility
+def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    return grep(
+        pattern=pattern,
+        path=kwargs.get("path"),
+        glob=kwargs.get("glob"),
+        type=kwargs.get("type"),
+        output_mode=kwargs.get("output_mode", "content"),
+        case_insensitive=kwargs.get("case_insensitive"),
+        line_numbers=kwargs.get("line_numbers"),
+        context_before=kwargs.get("context_before"),
+        context_after=kwargs.get("context_after"),
+        context=kwargs.get("context"),
+        head_limit=kwargs.get("head_limit", 50),
+        multiline=kwargs.get("multiline")
+    )

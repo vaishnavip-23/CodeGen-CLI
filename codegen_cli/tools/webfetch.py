@@ -2,6 +2,7 @@
 
 """
 Web Fetch Tool for CodeGen-CLI
+Refactored to use Gemini's native Pydantic function calling with from_callable().
 
 This tool fetches content from web URLs and extracts text.
 It includes content length limits and error handling.
@@ -17,44 +18,6 @@ except ImportError:
     types = None
 
 from ..models.schema import WebFetchInput, WebFetchOutput
-
-# Function declaration for Gemini function calling  
-FUNCTION_DECLARATION = {
-    "name": "fetch_url",
-    "description": "Fetch and extract text content from a web URL. Use for documentation, articles, or web resources.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "URL to fetch content from"
-            },
-            "max_chars": {
-                "type": "integer",
-                "description": "Maximum characters to return (default: 20000)"
-            }
-        },
-        "required": ["url"]
-    }
-}
-
-def get_function_declaration():
-    """Get Gemini function declaration for this tool."""
-    if types is None:
-        return None
-    
-    return types.FunctionDeclaration(
-        name=FUNCTION_DECLARATION["name"],
-        description=FUNCTION_DECLARATION["description"],
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "url": types.Schema(type=types.Type.STRING, description="URL to fetch"),
-                "max_chars": types.Schema(type=types.Type.INTEGER, description="Max characters (default: 20000)")
-            },
-            required=["url"]
-        )
-    )
 
 def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
     """
@@ -113,40 +76,41 @@ def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
     except Exception as e:
         raise Exception(f"Content extraction error: {e}")
 
-def call(url: str, *args, **kwargs) -> Dict[str, Any]:
-    """
-    Fetch content from a web URL.
+
+def fetch_url(url: str, prompt: str = "") -> Dict[str, Any]:
+    """Fetch content from a URL and run a prompt on it.
+    
+    Fetches web content and uses AI to process it based on the provided prompt.
+    For now, prompt is not used but kept for API compatibility.
     
     Args:
-        url: URL to fetch content from
-        *args: Additional positional arguments (ignored)
-        **kwargs: Keyword arguments including:
-            prompt: Optional prompt (not used, kept for compatibility)
-            max_chars: Maximum number of characters to return (default: 20000)
+        url: The URL to fetch content from
+        prompt: The prompt to run on the fetched content (currently not used)
         
     Returns:
-        Dictionary with success status and content
+        A dictionary containing response text, URL, final URL, and status code.
     """
+    # Validate using Pydantic model
     try:
         input_data = WebFetchInput(
             url=url.strip() if url else "",
-            prompt=kwargs.get("prompt", "")
+            prompt=prompt
         )
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
     
-    fetch_url = input_data.url
-    if not (fetch_url.startswith("http://") or fetch_url.startswith("https://")):
-        fetch_url = "https://" + fetch_url
+    fetch_url_str = input_data.url
+    if not (fetch_url_str.startswith("http://") or fetch_url_str.startswith("https://")):
+        fetch_url_str = "https://" + fetch_url_str
     
-    max_chars = kwargs.get("max_chars", 20000)
+    max_chars = 20000
     
     try:
-        content = fetch_web_content(fetch_url, max_chars)
+        content = fetch_web_content(fetch_url_str, max_chars)
         
         output = WebFetchOutput(
             response=content["text"],
-            url=fetch_url,
+            url=fetch_url_str,
             final_url=None,
             status_code=None
         )
@@ -154,3 +118,30 @@ def call(url: str, *args, **kwargs) -> Dict[str, Any]:
         
     except Exception as e:
         raise IOError(f"Web fetch error: {e}")
+
+
+def get_function_declaration(client):
+    """Get Gemini function declaration using from_callable().
+    
+    Args:
+        client: Gemini client instance (required by from_callable)
+        
+    Returns:
+        FunctionDeclaration object for this tool
+    """
+    if types is None:
+        return None
+    
+    return types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=fetch_url
+    )
+
+
+# Keep backward compatibility
+def call(url: str, *args, **kwargs) -> Dict[str, Any]:
+    """Call function for backward compatibility with manual execution."""
+    return fetch_url(
+        url=url,
+        prompt=kwargs.get("prompt", "")
+    )
