@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 100% Pydantic Native Function Calling Compliance
 
-This release achieves **100% compliance** with the **November 5, 2025 Gemini API Pydantic Native Function Calling update**, implementing full Pydantic validation for both inputs and outputs across all 12 tools.
+This release achieves **100% compliance** with the Gemini API Pydantic Native Function Calling update**, implementing full Pydantic validation for both inputs and outputs across all 12 tools.
 
 ### Added - Pydantic Native Function Calling
 
@@ -75,16 +75,7 @@ def get_function_declaration(client):
 11. `fetch_url` - WebFetchInput → WebFetchOutput
 12. `search_web` - WebSearchInput → WebSearchOutput
 
-#### **Implementation Pattern:**
 
-```python
-def tool_function(param: PydanticType) -> PydanticOutput:
-    # Validate inputs with Pydantic
-    input_data = PydanticInput(param=param)
-    # Process with validated data
-    # Return Pydantic model directly
-    return PydanticOutput(...)
-```
 
 ### Benefits
 
@@ -279,8 +270,8 @@ This release transforms CodeGen-CLI into a significantly smarter, more capable, 
 ---
 
 ## Version History
-
-- **v0.5.0** (Current): 100% Pydantic Native Function Calling compliance
+- **v0.5.1** (Current) : Small patches to the changelog
+- **v0.5.0** (Main): 100% Pydantic Native Function Calling compliance
 - **v0.4.0**: Major intelligence & transparency upgrade
 - **v0.2.0**: Agentic loop with iterative reasoning
 - **v0.1.0** (Initial): Basic CLI agent with tool support
