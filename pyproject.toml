@@ -1,6 +1,6 @@
 [project]
 name = "codegen-cli"
-version = "0.4.0"
+version = "0.5.0"
 description = "Command-line coding agent with iterative reasoning, inspired by Claude Code and Cursor CLI, powered by Google Gemini API."
 readme = "README.md"
 license = {text = "MIT"}
@@ -65,5 +65,7 @@ include = [
     "codegen_cli/",
     "docs/",
     "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
     "pyproject.toml",
 ]
