@@ -270,8 +270,7 @@ This release transforms CodeGen-CLI into a significantly smarter, more capable, 
 ---
 
 ## Version History
-- **v0.5.1** (Current) : Small patches to the changelog
-- **v0.5.0** (Main): 100% Pydantic Native Function Calling compliance
+- **v0.5.0** (Current): 100% Pydantic Native Function Calling compliance
 - **v0.4.0**: Major intelligence & transparency upgrade
 - **v0.2.0**: Agentic loop with iterative reasoning
 - **v0.1.0** (Initial): Basic CLI agent with tool support
