@@ -186,7 +186,7 @@ history.json
 *.log
 
 # Development and publishing files (remove from .gitignore when ready to publish)
-CHANGELOG.md
+
 PUBLISHING.md
 quickstart.sh
 .github/
@@ -198,7 +198,5 @@ PyPI guide.txt
 # Summary file (not for version control)
 
 
-.ruff_cache
-COMPLETE_EXPLANATION.MD
-HOW_DROID_WORKS.md
+
 
