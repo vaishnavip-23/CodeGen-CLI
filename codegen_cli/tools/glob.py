@@ -42,7 +42,7 @@ def is_safe_path(file_path: str) -> bool:
         return False
 
 
-def find_files(pattern: str = "**/*", path: Optional[str] = None) -> Dict[str, Any]:
+def find_files(pattern: str = "**/*", path: Optional[str] = None) -> GlobOutput:
     """Find files matching a glob pattern.
     
     Searches for files matching the specified glob pattern in the given directory or workspace.
@@ -53,7 +53,7 @@ def find_files(pattern: str = "**/*", path: Optional[str] = None) -> Dict[str, A
         path: The directory to search in (optional, defaults to current working directory)
         
     Returns:
-        A dictionary containing matching file paths, count, and search path.
+        GlobOutput Pydantic model containing matching file paths, count, and search path.
     """
     # Validate using Pydantic model
     try:
@@ -87,7 +87,7 @@ def find_files(pattern: str = "**/*", path: Optional[str] = None) -> Dict[str, A
             count=len(safe_matches),
             search_path=search_path
         )
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Error matching pattern: {e}")
@@ -114,7 +114,8 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(pattern: str = "**/*", *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
-    return find_files(
+    result = find_files(
         pattern=pattern,
         path=kwargs.get("path")
     )
+    return result.model_dump()

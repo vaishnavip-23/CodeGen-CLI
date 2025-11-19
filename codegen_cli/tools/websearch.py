@@ -87,7 +87,7 @@ def search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     except Exception as e:
         raise Exception(f"Parsing error: {e}")
 
-def search_web(query: str, allowed_domains: Optional[List[str]] = None, blocked_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+def search_web(query: str, allowed_domains: Optional[List[str]] = None, blocked_domains: Optional[List[str]] = None) -> WebSearchOutput:
     """Search the web for information.
     
     Performs a web search using DuckDuckGo and returns relevant results.
@@ -98,7 +98,7 @@ def search_web(query: str, allowed_domains: Optional[List[str]] = None, blocked_
         blocked_domains: Never include results from these domains (optional)
         
     Returns:
-        A dictionary containing search results, total count, and query used.
+        WebSearchOutput Pydantic model containing search results, total count, and query used.
     """
     # Validate using Pydantic model
     try:
@@ -133,7 +133,7 @@ def search_web(query: str, allowed_domains: Optional[List[str]] = None, blocked_
             total_results=len(search_results),
             query=input_data.query
         )
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Web search error: {e}")
@@ -160,8 +160,9 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(query: str, *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
-    return search_web(
+    result = search_web(
         query=query,
         allowed_domains=kwargs.get("allowed_domains"),
         blocked_domains=kwargs.get("blocked_domains")
     )
+    return result.model_dump()

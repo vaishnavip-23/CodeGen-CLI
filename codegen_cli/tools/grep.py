@@ -7,8 +7,8 @@ Refactored to use Gemini's native Pydantic function calling with from_callable()
 
 import os
 import re
-from glob import glob
-from typing import List, Dict, Any, Optional
+from glob import glob as glob_search
+from typing import List, Dict, Any, Optional, Union
 
 try:
     from google.genai import types
@@ -67,7 +67,7 @@ def grep(
     context: Optional[int] = None,
     head_limit: int = 50,
     multiline: Optional[bool] = None
-) -> Dict[str, Any]:
+) -> Union[GrepOutputContent, GrepOutputFiles]:
     """Search for text patterns across files using regular expressions.
     
     High-performance file content search using ripgrep-style parameters.
@@ -88,7 +88,7 @@ def grep(
         multiline: Enable multiline mode where patterns can span lines (optional)
         
     Returns:
-        Dictionary containing matches or file paths and total count.
+        GrepOutputContent or GrepOutputFiles Pydantic model depending on output_mode.
     """
     try:
         input_data = GrepInput(
@@ -113,7 +113,7 @@ def grep(
     
     try:
         search_path = os.path.join(WORKSPACE, path_pattern)
-        files = glob(search_path, recursive=True)
+        files = glob_search(search_path, recursive=True)
         
         safe_files = [f for f in files if is_safe_path(f)]
         
@@ -134,7 +134,7 @@ def grep(
                 files=unique_files,
                 count=len(unique_files)
             )
-            return output.model_dump()
+            return output
         else:
             grep_matches = [
                 GrepMatch(
@@ -150,7 +150,7 @@ def grep(
                 matches=grep_matches,
                 total_matches=len(grep_matches)
             )
-            return output.model_dump()
+            return output
         
     except Exception as e:
         raise IOError(f"Error searching files: {e}")
@@ -177,7 +177,7 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
-    return grep(
+    result = grep(
         pattern=pattern,
         path=kwargs.get("path"),
         glob=kwargs.get("glob"),
@@ -191,3 +191,4 @@ def call(pattern: str, *args, **kwargs) -> Dict[str, Any]:
         head_limit=kwargs.get("head_limit", 50),
         multiline=kwargs.get("multiline")
     )
+    return result.model_dump()

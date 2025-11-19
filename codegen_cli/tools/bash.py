@@ -33,7 +33,7 @@ def is_command_allowed(command: List[str]) -> tuple[bool, str]:
     return True, ""
 
 
-def run_command(command: str, timeout: Optional[int] = None, description: str = "", run_in_background: bool = False) -> Dict[str, Any]:
+def run_command(command: str, timeout: Optional[int] = None, description: str = "", run_in_background: bool = False) -> BashOutput:
     """Execute a shell command safely.
     
     Runs a shell command and returns the output. Use for running tests, building,
@@ -46,7 +46,7 @@ def run_command(command: str, timeout: Optional[int] = None, description: str = 
         run_in_background: Set to true to run in background (not implemented yet)
         
     Returns:
-        A dictionary containing output, exit code, and optional shell ID for background processes.
+        BashOutput Pydantic model containing output, exit code, and optional shell ID.
     """
     # Validate using Pydantic model
     try:
@@ -131,7 +131,7 @@ def run_command(command: str, timeout: Optional[int] = None, description: str = 
             killed=False,
             shellId=None
         )
-        return output.model_dump()
+        return output
         
     except subprocess.TimeoutExpired:
         raise TimeoutError(f"Command timed out after {timeout_ms}ms")
@@ -161,9 +161,10 @@ def get_function_declaration(client):
 def call(command: Union[str, List[str]], *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
     cmd_str = command if isinstance(command, str) else " ".join(command)
-    return run_command(
+    result = run_command(
         command=cmd_str,
         timeout=kwargs.get("timeout"),
         description=kwargs.get("description", ""),
         run_in_background=kwargs.get("run_in_background", False)
     )
+    return result.model_dump()

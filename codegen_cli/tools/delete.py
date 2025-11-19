@@ -49,7 +49,7 @@ def is_safe_path(path: str) -> bool:
         return False
 
 
-def delete_file(path: str) -> Dict[str, Any]:
+def delete_file(path: str) -> DeleteOutput:
     """Delete a file or directory.
     
     Removes a file or recursively removes a directory and all its contents.
@@ -59,7 +59,7 @@ def delete_file(path: str) -> Dict[str, Any]:
         path: Path to file or directory to delete. If directory, all contents will be deleted recursively.
         
     Returns:
-        A dictionary containing success message, list of deleted items, and count.
+        DeleteOutput Pydantic model containing success message, list of deleted items, and count.
     """
     if not path:
         raise ValueError("Path is required")
@@ -124,7 +124,7 @@ def delete_file(path: str) -> Dict[str, Any]:
             deleted_items=deleted,
             count=len(deleted)
         )
-        return output.model_dump()
+        return output
 
     raise IOError("Deletion cancelled." if skipped else "No deletions performed.")
 
@@ -152,4 +152,5 @@ def call(path: str = None, *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
     if not path:
         raise ValueError("Path is required")
-    return delete_file(path=path)
+    result = delete_file(path=path)
+    return result.model_dump()

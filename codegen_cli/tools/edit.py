@@ -28,7 +28,7 @@ def is_safe_path(file_path: str) -> bool:
         return False
 
 
-def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> dict:
+def edit_file(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> EditOutput:
     """Edit an existing file by finding and replacing text.
     
     Modifies an existing file by replacing occurrences of old_string with new_string.
@@ -41,7 +41,7 @@ def edit_file(file_path: str, old_string: str, new_string: str, replace_all: boo
         replace_all: Replace all occurrences (default False, replaces first only)
         
     Returns:
-        A dictionary containing confirmation message, number of replacements, and file path.
+        EditOutput Pydantic model containing confirmation message, number of replacements, and file path.
     """
     # Validate using Pydantic model
     try:
@@ -80,7 +80,7 @@ def edit_file(file_path: str, old_string: str, new_string: str, replace_all: boo
                 replacements=1,
                 file_path=input_data.file_path
             )
-            return output.model_dump()
+            return output
 
         if input_data.old_string not in original_content:
             if smart and isinstance(input_data.old_string, str):
@@ -99,7 +99,7 @@ def edit_file(file_path: str, old_string: str, new_string: str, replace_all: boo
                             replacements=n,
                             file_path=input_data.file_path
                         )
-                        return output.model_dump()
+                        return output
             raise ValueError(f"Text '{input_data.old_string}' not found in file")
         
         if input_data.replace_all:
@@ -116,7 +116,7 @@ def edit_file(file_path: str, old_string: str, new_string: str, replace_all: boo
             replacements=replacements,
             file_path=input_data.file_path
         )
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Error editing file: {e}")
@@ -143,9 +143,18 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(file_path: str, *args, **kwargs) -> dict:
     """Call function for backward compatibility with manual execution."""
-    return edit_file(
+    # Backwards compatibility: accept old_string as first positional arg
+    if args:
+        old_str = args[0]
+        new_str = args[1] if len(args) > 1 else kwargs.get("new_string", "")
+    else:
+        old_str = kwargs.get("old_string", "")
+        new_str = kwargs.get("new_string", "")
+    
+    result = edit_file(
         file_path=file_path,
-        old_string=kwargs.get("old_string", ""),
-        new_string=kwargs.get("new_string", ""),
+        old_string=old_str,
+        new_string=new_str,
         replace_all=kwargs.get("replace_all", False)
     )
+    return result.model_dump()

@@ -16,7 +16,7 @@ try:
 except ImportError:
     types = None
 
-from ..models.schema import TodoItem, TodoStats, TodoWriteOutput
+from ..models.schema import TodoWriteInput, TodoItem, TodoStats, TodoWriteOutput
 
 
 def _resolve_db_paths():
@@ -80,102 +80,32 @@ def _merge_by_id(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]])
         return list(by_id.values())
 
 
-def manage_todos(
-    action: Optional[str] = "list",
-    text: Optional[str] = None,
-    todos: Optional[List[Dict[str, Any]]] = None,
-    merge: bool = False
-) -> Dict[str, Any]:
+def manage_todos(todos: List[TodoItem]) -> TodoWriteOutput:
     """Manage todo list for MODIFICATION tasks (8+ files).
     
     Use for tracking multi-file MODIFICATION tasks only. NEVER for analysis/reading.
-    Supports batch operations (preferred for 8+ files) and individual actions.
+    Creates or updates multiple todos at once (batch operations).
     
     Args:
-        action: Action to perform - 'add' (create single todo), 'list' (show all), 
-                'pop' (mark first done), 'clear' (remove all). For 8+ todos, use 'todos' parameter instead.
-        text: Todo text when action='add' (required for add action)
-        todos: BATCH MODE - create/update multiple todos at once (PREFERRED for 8+ files). 
-               Array of todo objects with id, content, and status fields. Saves API calls!
-        merge: If True with todos parameter, merges with existing todos by id (optional)
+        todos: List of TodoItem objects to create/update. Each todo must have content and status.
         
     Returns:
-        A dictionary containing todo list or operation results and statistics.
+        TodoWriteOutput Pydantic model containing todo list or operation results and statistics.
     
-    Examples:
-        Batch mode (PREFERRED for 8+ items):
-            manage_todos(todos=[
-                {"id":"1", "content":"Update file1.py", "status":"pending"},
-                {"id":"2", "content":"Update file2.py", "status":"pending"}
-            ])
-        
-        Single todo (for 1-2 items only):
-            manage_todos(action="add", text="Update config.py")
-        
-        List all:
-            manage_todos(action="list")
+    Example:
+        manage_todos(todos=[
+            TodoItem(id="1", content="Update file1.py", status="pending"),
+            TodoItem(id="2", content="Update file2.py", status="pending")
+        ])
     """
-    # Handle batch mode - todos array provided
-    if todos is not None:
-        # Validate todos can be converted to TodoItem objects
-        try:
-            for t in todos:
-                TodoItem(
-                    content=t.get("content", ""),
-                    status=t.get("status", "pending"),
-                    priority=t.get("priority"),
-                    id=t.get("id")
-                )
-        except Exception as e:
-            raise ValueError(f"Invalid todo items: {e}")
-        
-        if merge:
-            existing = read_todos()
-            updated = _merge_by_id(existing, todos)
-            write_todos_to_db(updated)
-        else:
-            if not isinstance(todos, list) or not all(_is_todo_item(it) for it in todos):
-                raise ValueError("Invalid todos array. Each item must have id, content, status.")
-            write_todos_to_db(todos)
-        
-        return {
-            "tool": "todowrite",
-            "success": True,
-            "output": {"message": "Todos updated", "count": len(todos)}
-        }
+    # Validate using Pydantic model
+    try:
+        input_data = TodoWriteInput(todos=todos or [])
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
     
-    # Handle individual actions
-    if action == "add":
-        if not text or not text.strip():
-            raise ValueError("Todo text cannot be empty for 'add' action")
-        
-        existing_todos = read_todos()
-        text_normalized = text.strip().lower()
-        
-        # Check for duplicates (case-insensitive)
-        for existing in existing_todos:
-            if existing.get("content", "").strip().lower() == text_normalized:
-                return {
-                    "tool": "todowrite",
-                    "success": True,
-                    "output": existing_todos
-                }
-        
-        new_todo = {
-            "id": str(len(existing_todos) + 1),
-            "content": text.strip(),
-            "status": "pending"
-        }
-        existing_todos.append(new_todo)
-        write_todos_to_db(existing_todos)
-        
-        return {
-            "tool": "todowrite",
-            "success": True,
-            "output": existing_todos
-        }
-    
-    elif action == "list":
+    if not input_data.todos:
+        # If no todos provided, return current list
         existing_todos = read_todos()
         stats = TodoStats(
             total=len(existing_todos),
@@ -183,47 +113,38 @@ def manage_todos(
             in_progress=len([t for t in existing_todos if t.get("status") == "in_progress"]),
             completed=len([t for t in existing_todos if t.get("status") == "completed"])
         )
-        output = TodoWriteOutput(
+        todo_items = [TodoItem(**t) for t in existing_todos]
+        return TodoWriteOutput(
+            tool="todowrite",
+            success=True,
             message=f"Found {len(existing_todos)} todos",
-            stats=stats
+            stats=stats,
+            todos=todo_items
         )
-        return output.model_dump()
     
-    elif action == "pop":
-        existing_todos = read_todos()
-        if not existing_todos:
-            return {
-                "tool": "todowrite",
-                "success": False,
-                "output": "No todos to remove."
-            }
-        
-        existing_todos.pop(0)
-        write_todos_to_db(existing_todos)
-        
-        return {
-            "tool": "todowrite",
-            "success": True,
-            "output": existing_todos
+    # Convert TodoItem objects to dicts for storage
+    todos_as_dicts = []
+    for idx, todo_item in enumerate(input_data.todos):
+        todo_dict = {
+            "id": todo_item.id or str(idx + 1),
+            "content": todo_item.content,
+            "status": todo_item.status,
         }
+        if todo_item.priority:
+            todo_dict["priority"] = todo_item.priority
+        todos_as_dicts.append(todo_dict)
     
-    elif action == "clear":
-        write_todos_to_db([])
-        try:
-            import shutil
-            if os.path.exists(DB_DIR):
-                shutil.rmtree(DB_DIR)
-        except Exception:
-            pass
-        
-        return {
-            "tool": "todowrite",
-            "success": True,
-            "output": "Cleared all todos and cleaned up database."
-        }
+    # Always merge by ID to avoid overwriting existing todos
+    existing = read_todos()
+    updated = _merge_by_id(existing, todos_as_dicts)
+    write_todos_to_db(updated)
     
-    else:
-        raise ValueError(f"Unknown action: {action}. Available actions: add, list, pop, clear")
+    return TodoWriteOutput(
+        tool="todowrite",
+        success=True,
+        message=f"Updated {len(input_data.todos)} todos",
+        count=len(input_data.todos)
+    )
 
 
 def get_function_declaration(client):
@@ -247,31 +168,104 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(action: Union[str, list, dict] = "list", *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
-    # Handle direct list of todos
+    
+    # Helper to convert dict to TodoItem
+    def dict_to_todo_item(d: Dict[str, Any], idx: int = 0) -> TodoItem:
+        return TodoItem(
+            id=d.get("id", str(idx + 1)),
+            content=d.get("content", ""),
+            status=d.get("status", "pending"),
+            priority=d.get("priority")
+        )
+    
+    # Handle direct list of todos (batch mode)
     if isinstance(action, list):
-        return manage_todos(todos=action, merge=kwargs.get("merge", False))
+        todo_items = [dict_to_todo_item(t, i) if isinstance(t, dict) else t 
+                     for i, t in enumerate(action)]
+        result = manage_todos(todos=todo_items)
+        return result.model_dump()
     
     # Handle list passed as first argument
     if args and isinstance(args[0], list):
-        return manage_todos(todos=args[0], merge=kwargs.get("merge", False))
+        todo_items = [dict_to_todo_item(t, i) if isinstance(t, dict) else t 
+                     for i, t in enumerate(args[0])]
+        result = manage_todos(todos=todo_items)
+        return result.model_dump()
     
     # Handle dict with todos key
     if args and isinstance(args[0], dict):
         obj = args[0]
         todos_arg = obj.get("todos")
         if isinstance(todos_arg, list):
-            return manage_todos(todos=todos_arg, merge=obj.get("merge", False))
+            todo_items = [dict_to_todo_item(t, i) if isinstance(t, dict) else t 
+                         for i, t in enumerate(todos_arg)]
+            result = manage_todos(todos=todo_items)
+            return result.model_dump()
     
-    # Handle individual actions
+    # Handle kwargs todos
+    if kwargs.get("todos"):
+        todos_arg = kwargs.get("todos")
+        if isinstance(todos_arg, list):
+            todo_items = [dict_to_todo_item(t, i) if isinstance(t, dict) else t 
+                         for i, t in enumerate(todos_arg)]
+            result = manage_todos(todos=todo_items)
+            return result.model_dump()
+    
+    # Handle individual actions (convert to batch operations)
     action_str = action if isinstance(action, str) else "list"
     
     if action_str == "add":
+        # Add a single todo
         text = " ".join(args) if args else kwargs.get("text", "")
-        return manage_todos(action="add", text=text)
+        if not text:
+            raise ValueError("Todo text cannot be empty for 'add' action")
+        
+        existing_todos = read_todos()
+        new_todo = TodoItem(
+            id=str(len(existing_todos) + 1),
+            content=text.strip(),
+            status="pending"
+        )
+        result = manage_todos(todos=[new_todo])
+        return result.model_dump()
     
-    return manage_todos(
-        action=action_str,
-        text=kwargs.get("text"),
-        todos=kwargs.get("todos"),
-        merge=kwargs.get("merge", False)
-    )
+    elif action_str == "list":
+        # List all todos (empty call)
+        result = manage_todos(todos=[])
+        return result.model_dump()
+    
+    elif action_str == "pop":
+        # Remove first todo
+        existing_todos = read_todos()
+        if not existing_todos:
+            return {
+                "tool": "todowrite",
+                "success": False,
+                "output": "No todos to remove."
+            }
+        existing_todos.pop(0)
+        write_todos_to_db(existing_todos)
+        return {
+            "tool": "todowrite",
+            "success": True,
+            "output": "Removed first todo"
+        }
+    
+    elif action_str == "clear":
+        # Clear all todos
+        write_todos_to_db([])
+        try:
+            import shutil
+            if os.path.exists(DB_DIR):
+                shutil.rmtree(DB_DIR)
+        except Exception:
+            pass
+        return {
+            "tool": "todowrite",
+            "success": True,
+            "output": "Cleared all todos and cleaned up database."
+        }
+    
+    # Default: list todos
+    result = manage_todos(todos=[])
+    return result.model_dump()

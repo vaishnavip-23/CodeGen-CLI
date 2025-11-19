@@ -77,7 +77,7 @@ def fetch_web_content(url: str, max_chars: int = 20000) -> Dict[str, str]:
         raise Exception(f"Content extraction error: {e}")
 
 
-def fetch_url(url: str, prompt: str = "") -> Dict[str, Any]:
+def fetch_url(url: str, prompt: str = "") -> WebFetchOutput:
     """Fetch content from a URL and run a prompt on it.
     
     Fetches web content and uses AI to process it based on the provided prompt.
@@ -88,7 +88,7 @@ def fetch_url(url: str, prompt: str = "") -> Dict[str, Any]:
         prompt: The prompt to run on the fetched content (currently not used)
         
     Returns:
-        A dictionary containing response text, URL, final URL, and status code.
+        WebFetchOutput Pydantic model containing response text, URL, final URL, and status code.
     """
     # Validate using Pydantic model
     try:
@@ -114,7 +114,7 @@ def fetch_url(url: str, prompt: str = "") -> Dict[str, Any]:
             final_url=None,
             status_code=None
         )
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Web fetch error: {e}")
@@ -141,7 +141,8 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(url: str, *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
-    return fetch_url(
+    result = fetch_url(
         url=url,
         prompt=kwargs.get("prompt", "")
     )
+    return result.model_dump()

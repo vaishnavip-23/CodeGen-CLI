@@ -8,105 +8,90 @@ Performs multiple file edits atomically in sequence. All edits must succeed or a
 import os
 from typing import List, Dict, Any, Optional
 
-from .edit import call as edit_call
+from .edit import edit_file
 
 try:
     from google.genai import types
 except ImportError:
     types = None
 
-from ..models.schema import MultiEditChange, MultiEditResult, MultiEditOutput
+from ..models.schema import MultiEditInput, MultiEditChange, MultiEditResult, MultiEditOutput
 
 WORKSPACE = os.getcwd()
 
 
-def multi_edit(edits: List[Dict[str, Any]], path: Optional[str] = None) -> Dict[str, Any]:
+def multi_edit(path: Optional[str] = None, edits: List[MultiEditChange] = None) -> MultiEditOutput:
     """Perform multiple file edits atomically in sequence.
     
     Applies multiple edits to one or more files in sequence. All edits must succeed
     or the operation fails. Each edit can specify its own path or use the base path.
     
     Args:
-        edits: Array of edit operations. Each edit must have 'old_string' and 'new_string',
-               and can optionally have 'path' (overrides base path) and 'replace_all' (bool).
         path: Base file path used if individual edits don't specify their own path (optional)
+        edits: List of edit operations (MultiEditChange objects). Each edit must have 'old_string' 
+               and 'new_string', and can optionally have 'path' (overrides base path) and 'replace_all' (bool).
         
     Returns:
-        A dictionary containing results for each edit, total edits, and successful count.
+        MultiEditOutput Pydantic model containing results for each edit, total edits, and successful count.
         
     Example:
-        multi_edit(edits=[
-            {"old_string": "old1", "new_string": "new1"},
-            {"old_string": "old2", "new_string": "new2"}
-        ], path="/path/to/file.py")
+        multi_edit(path="/path/to/file.py", edits=[
+            MultiEditChange(old_string="old1", new_string="new1"),
+            MultiEditChange(old_string="old2", new_string="new2")
+        ])
         
         multi_edit(edits=[
-            {"path": "/path/to/file1.py", "old_string": "old1", "new_string": "new1"},
-            {"path": "/path/to/file2.py", "old_string": "old2", "new_string": "new2"}
+            MultiEditChange(path="/path/to/file1.py", old_string="old1", new_string="new1"),
+            MultiEditChange(path="/path/to/file2.py", old_string="old2", new_string="new2")
         ])
     """
-    if not edits:
-        raise ValueError("At least one edit operation is required")
-    
-    if not isinstance(edits, list):
-        raise ValueError("edits must be a list of edit operations")
-    
-    # Validate all edits can be converted to MultiEditChange objects
+    # Validate using Pydantic model
     try:
-        for e in edits:
-            MultiEditChange(
-                path=e.get("path"),
-                old_string=e.get("old_string", e.get("a")),
-                new_string=e.get("new_string", e.get("b")),
-                replace_all=e.get("replace_all", False)
-            )
+        input_data = MultiEditInput(
+            path=path,
+            edits=edits or []
+        )
     except Exception as e:
-        raise ValueError(f"Invalid edit structure: {e}")
+        raise ValueError(f"Invalid input: {e}")
+    
+    if not input_data.edits:
+        raise ValueError("At least one edit operation is required")
     
     summary = []
     
-    for i, entry in enumerate(edits, start=1):
-        if not isinstance(entry, dict):
-            raise ValueError(f"Edit #{i} is not a dictionary")
-        
-        edit_data = dict(entry)
-        edit_path = edit_data.get("path") or path
+    for i, edit_change in enumerate(input_data.edits, start=1):
+        # Get the path for this edit (use edit's path or fall back to base path)
+        edit_path = edit_change.path or input_data.path
         
         if not edit_path:
             raise ValueError(f"Edit #{i} is missing 'path' and no base path provided")
         
-        old_value = edit_data.get("old_string")
-        if old_value is None:
-            old_value = edit_data.get("a")
-        
-        new_value = edit_data.get("new_string")
-        if new_value is None:
-            new_value = edit_data.get("b")
-        
-        if old_value is None or new_value is None:
-            raise ValueError(f"Edit #{i} is missing 'old_string' or 'new_string'")
-        
-        replace_all = bool(edit_data.get("replace_all", False))
+        old_value = edit_change.old_string
+        new_value = edit_change.new_string
+        replace_all = edit_change.replace_all if edit_change.replace_all is not None else False
         
         try:
-            res = edit_call(
-                edit_path,
-                old_value,
-                new_value,
-                replace_all=replace_all,
-                skip_python_check=True,
+            res = edit_file(
+                file_path=edit_path,
+                old_string=old_value,
+                new_string=new_value,
+                replace_all=replace_all
             )
             result_obj = MultiEditResult(
                 step=i,
                 path=edit_path,
-                success=res.get("success", False),
-                message=res.get("output", "")
+                success=True,
+                message=res.message
             )
             summary.append(result_obj)
-            
-            if not res.get("success"):
-                raise IOError(f"Edit step {i} failed: {res.get('output')}")
         except Exception as e:
+            result_obj = MultiEditResult(
+                step=i,
+                path=edit_path,
+                success=False,
+                message=str(e)
+            )
+            summary.append(result_obj)
             raise IOError(f"Edit step {i} failed: {e}")
     
     output = MultiEditOutput(
@@ -114,7 +99,7 @@ def multi_edit(edits: List[Dict[str, Any]], path: Optional[str] = None) -> Dict[
         total_edits=len(summary),
         successful_edits=len([s for s in summary if s.success])
     )
-    return output.model_dump()
+    return output
 
 
 def get_function_declaration(client):
@@ -178,4 +163,21 @@ def call(*args, **kwargs) -> Dict[str, Any]:
     if not isinstance(entries, (list, tuple)):
         raise ValueError("multiedit expects a list of edit dicts")
     
-    return multi_edit(edits=list(entries), path=base_path)
+    # Convert dict entries to MultiEditChange objects
+    edit_changes = []
+    for entry in entries:
+        if isinstance(entry, MultiEditChange):
+            edit_changes.append(entry)
+        elif isinstance(entry, dict):
+            # Support legacy format with old_string/new_string or a/b
+            edit_changes.append(MultiEditChange(
+                path=entry.get("path"),
+                old_string=entry.get("old_string", entry.get("a")),
+                new_string=entry.get("new_string", entry.get("b")),
+                replace_all=entry.get("replace_all", False)
+            ))
+        else:
+            raise ValueError(f"Invalid edit entry: {entry}")
+    
+    result = multi_edit(path=base_path, edits=edit_changes)
+    return result.model_dump()

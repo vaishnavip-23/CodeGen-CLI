@@ -26,7 +26,7 @@ def is_safe_path(file_path: str) -> bool:
         return False
 
 
-def write_file(file_path: str, content: str) -> dict:
+def write_file(file_path: str, content: str) -> WriteOutput:
     """Create a new file or overwrite an existing file with content.
     
     Use for creating new files only. Creates parent directories if needed.
@@ -36,7 +36,7 @@ def write_file(file_path: str, content: str) -> dict:
         content: The content to write to the file
         
     Returns:
-        A dictionary containing success message, bytes written, and file path.
+        WriteOutput Pydantic model containing success message, bytes written, and file path.
     """
     # Validate using Pydantic model
     try:
@@ -70,7 +70,7 @@ def write_file(file_path: str, content: str) -> dict:
             file_path=input_data.file_path
         )
         
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Error writing file: {e}")
@@ -97,7 +97,8 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(file_path: str, *args, **kwargs) -> dict:
     """Call function for backward compatibility with manual execution."""
-    return write_file(
+    result = write_file(
         file_path=file_path,
         content=kwargs.get("content", "")
     )
+    return result.model_dump()

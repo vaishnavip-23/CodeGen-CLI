@@ -265,8 +265,12 @@ class WebFetchOutput(BaseModel):
 class TodoItem(BaseModel):
     """Single todo item."""
     content: str = Field(..., description="The task description")
-    status: Literal["pending", "in_progress", "completed"] = Field(..., description="Task status")
-    priority: Optional[Literal["high", "medium", "low"]] = Field(None, description="Task priority")
+    status: Literal["pending", "in_progress", "completed"] = Field(
+        ..., description="Task status"
+    )
+    priority: Optional[Literal["high", "medium", "low"]] = Field(
+        None, description="Task priority"
+    )
     id: Optional[str] = Field(None, description="Unique identifier for the todo item")
 
 
@@ -284,6 +288,25 @@ class TodoStats(BaseModel):
 
 
 class TodoWriteOutput(BaseModel):
-    """Output schema for the TodoWrite tool."""
-    message: str = Field(..., description="Success message")
-    stats: TodoStats = Field(..., description="Todo statistics")
+    """
+    Unified output schema for the TodoWrite tool.
+
+    Used for all todo operations (add, list, pop, clear, batch updates).
+    """
+    tool: Literal["todowrite"] = Field(
+        "todowrite", description="Tool name that produced this result"
+    )
+    success: bool = Field(..., description="Whether the operation succeeded")
+    message: Optional[str] = Field(
+        None, description="Human-readable message about the result"
+    )
+    stats: Optional[TodoStats] = Field(
+        None, description="Todo statistics (usually set for 'list')"
+    )
+    todos: Optional[List[TodoItem]] = Field(
+        None, description="Current todo list after the operation"
+    )
+    count: Optional[int] = Field(
+        None,
+        description="Number of todos affected/updated (used in batch operations)",
+    )

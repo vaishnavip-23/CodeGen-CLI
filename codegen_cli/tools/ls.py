@@ -80,7 +80,7 @@ def walk_directory(root: Path, max_depth: int = None, ignore_set: set = None, sh
     return sorted(files)
 
 
-def list_files(path: str = ".", depth: Optional[int] = None, show_hidden: bool = False) -> Dict[str, Any]:
+def list_files(path: str = ".", depth: Optional[int] = None, show_hidden: bool = False) -> LsOutput:
     """List files and directories in the workspace.
     
     Lists all files and directories with options for depth control and showing hidden files.
@@ -92,7 +92,7 @@ def list_files(path: str = ".", depth: Optional[int] = None, show_hidden: bool =
         show_hidden: Show hidden files (default False)
         
     Returns:
-        A dictionary containing list of files, count, and path.
+        LsOutput Pydantic model containing list of files, count, and path.
     """
     # Validate using Pydantic model
     try:
@@ -128,7 +128,7 @@ def list_files(path: str = ".", depth: Optional[int] = None, show_hidden: bool =
             count=len(files),
             path=str(root_path)
         )
-        return output.model_dump()
+        return output
         
     except Exception as e:
         raise IOError(f"Error listing directory: {e}")
@@ -155,8 +155,9 @@ def get_function_declaration(client):
 # Keep backward compatibility
 def call(path: str = ".", *args, **kwargs) -> Dict[str, Any]:
     """Call function for backward compatibility with manual execution."""
-    return list_files(
+    result = list_files(
         path=path,
         depth=kwargs.get("depth"),
         show_hidden=kwargs.get("show_hidden", False)
     )
+    return result.model_dump()
