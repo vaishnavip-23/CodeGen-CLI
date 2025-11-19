@@ -46,8 +46,9 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/vaishnavip-23/CodeGen-CLI"
-Documentation = "https://github.com/vaishnavip-23/CodeGen-CLI/blob/main/docs/README.md"
+Documentation = "https://github.com/vaishnavip-23/CodeGen-CLI/blob/main/README.md"
 Repository = "https://github.com/vaishnavip-23/CodeGen-CLI"
+Changelog = "https://github.com/vaishnavip-23/CodeGen-CLI/blob/main/CHANGELOG.md"
 
 
 [project.scripts]
