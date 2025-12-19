@@ -494,3 +494,4 @@ Provide a brief analysis and suggest the next action."""
 def create_agentic_loop(client, output_module=None, conversation_memory=None) -> AgenticLoop:
     """Factory function to create an agentic loop."""
     return AgenticLoop(client, output_module, conversation_memory)
+
